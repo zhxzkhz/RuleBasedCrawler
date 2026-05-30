@@ -1,12 +1,13 @@
 package com.zhhz.spider.network
 
+import com.zhhz.spider.DetailRoute
 import com.zhhz.spider.db.BookEntity
 import com.zhhz.spider.db.ChapterEntity
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class Book(
-    val detailUrl: String,
+    val url: String,
     val title: String,
     val author: String,
     val cover: String,
@@ -14,7 +15,16 @@ data class Book(
     val lastReadChapterTitle: String = "",
     val lastReadChapterIndex: Int = 0,
     val lastReadPageIndex: Int = 0,
-    val inLibrary: Boolean = false
+    val inLibrary: Boolean = false,
+    val availableSources: List<SearchBookSource> = emptyList()
+)
+
+// 1. 新增：表示具体的某一个书源的信息
+@Serializable
+data class SearchBookSource(
+    val ruleId: String,
+    val sourceName: String,
+    val url: String
 )
 
 @Serializable
@@ -22,11 +32,11 @@ data class SearchBook(
     val title: String,
     val author: String,
     val cover: String,
-    val detailUrl: String,
-    val ruleId: String, // 记录来源，点击进入详情时需要用它
-    val sourceName: String
+    val type: Int,
+    val sources: List<SearchBookSource>
 )
 
+@Serializable
 data class Chapter(
     val index: Int,     // 章节的绝对序号（0, 1, 2...），非常关键
     val title: String,   // 章节标题
@@ -38,7 +48,10 @@ data class BookDetail(
     val title: String,
     val author: String,
     val cover: String,
-    val desc: String
+    val desc: String,
+    val status: String,
+    val latestChapterTitle: String,
+    val catalogUrl: String
 )
 
 data class ReaderContent(
@@ -49,8 +62,27 @@ data class ReaderContent(
     val prevChapterUrl: String? = null
 )
 
-fun Book.toDomain() = BookEntity(
-    detailUrl = this.detailUrl,
+fun SearchBook.toDomain(searchBookSource: SearchBookSource = this.sources.first()) = Book(
+    url = searchBookSource.url,
+    title = this.title,
+    author = this.author,
+    cover = this.cover,
+    ruleId = searchBookSource.ruleId
+)
+
+
+fun SearchBook.toRoute(searchBookSource: SearchBookSource = this.sources.first()) = DetailRoute(
+    detailUrl = searchBookSource.url,
+    title = this.title,
+    author = this.author,
+    cover = this.cover,
+    ruleId = searchBookSource.ruleId
+)
+
+
+
+fun Book.toEntity() = BookEntity(
+    detailUrl = this.url,
     title = this.title,
     author = this.author,
     cover = this.cover,

@@ -12,37 +12,50 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
+import coil3.disk.DiskCache
+import coil3.disk.directory
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.request.CachePolicy
 import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.RuleEntity
 import com.zhhz.spider.di.commonModule
 import com.zhhz.spider.di.platformModule
-import com.zhhz.spider.manager.RuleManager
-import com.zhhz.spider.network.Book
+import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.network.HttpFetcher
 import com.zhhz.spider.network.MangaCallFactory
-import com.zhhz.spider.network.SearchBook
+import com.zhhz.spider.repository.RuleRepository
+import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.rule.SourceRule
 import com.zhhz.spider.ui.screen.*
+import com.zhhz.spider.util.DecryptingFetcher
+import com.zhhz.spider.viewModel.BookshelfViewModel
 import com.zhhz.spider.viewModel.DetailViewModel
 import com.zhhz.spider.viewModel.ReaderViewModel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import com.zhhz.spider.viewModel.SearchViewModel
+import okio.FileSystem
+import okio.Path
 import org.jetbrains.compose.resources.painterResource
 import org.koin.compose.KoinApplication
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import org.koin.core.qualifier.named
 import org.koin.dsl.KoinAppDeclaration
 import org.koin.dsl.module
+import org.koin.java.KoinJavaComponent.get
+import org.mozilla.javascript.Context
+import org.mozilla.javascript.ContextFactory
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.close_24px
+import java.io.File
 
 val appModule = module {
     includes(platformModule,commonModule)
@@ -63,15 +76,30 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
         // --- 内部的所有组件现在都可以使用注入了 ---
         val bookDao = koinInject<BookDao>()
         val httpFetcher = koinInject<HttpFetcher>()
-        val ruleManager = koinInject<RuleManager>()
+        val ruleRepository = koinInject<RuleRepository>()
+        val sessionRepository = koinInject<SessionRepository>()
+        val contextSessionManager = koinInject< ContextSessionManager>()
+
+        val diskCache = DiskCache.Builder()
+            .fileSystem(FileSystem.SYSTEM)
+            .maxSizeBytes(10 * 1024 * 1024 * 1024L) // 10GB
+            .directory(get(Path::class.java, named("imageCacheDir"))) // 💡 设进这里
+            .build()
+
+        val okHttpFactory = OkHttpNetworkFetcherFactory(
+            callFactory = MangaCallFactory(httpFetcher,ruleRepository,sessionRepository,contextSessionManager) // 👈 Koin 会自动把你的 MangaCallFactory 塞给它
+        )
 
         setSingletonImageLoaderFactory { context ->
             ImageLoader.Builder(context)
+                .diskCache(diskCache)
                 .components {
                     // 【核心挂载】不再传死 Client，而是传我们的动态工厂
+                    add(DecryptingFetcher.Factory(okHttpFactory))
+                    /*
                     add(OkHttpNetworkFetcherFactory(
-                        MangaCallFactory(httpFetcher,ruleManager)
-                    ))
+                        MangaCallFactory(httpFetcher,ruleRepository,sessionRepository,contextSessionManager)
+                    )) */
                 }
                 .build()
         }
@@ -102,53 +130,56 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
 
                 NavHost(
                     navController = navController,
-                    startDestination = "bookshelf"
+                    startDestination = "bookshelf",
+
                 ) {
                     composable("bookshelf") {
                         BookshelfScreen(
+                            viewModel = koinViewModel<BookshelfViewModel>(),
                             onGoToSearch = { navController.navigate("search") },
-                            onOpenBook = { book ->
+                            onNavigateToReader = { book ->
                                 navController.navigate(book)
                             },
-                            onDeleteBook = { book ->
-                                scope.launch(Dispatchers.IO) { bookDao.removeFromBookshelf(book) }
+                            onOpenRule = {
+                                isDebug = it
                             }
                         )
                     }
                     composable("search") {
                         SearchScreen(
-                            onBack = { navController.popBackStack() },
-                            onBookClick = { searchBook ->
+                            viewModel = koinViewModel<SearchViewModel>(),
+                            onNavigateBack = { navController.popBackStackSafe() },
+                            onNavigateToDetail = { route ->
                                 // 跳转详情并传递参数
-                                navController.navigate(searchBook)
-                            },
-                            onOpen = {
-                                isDebug = it
+                                navController.navigate(route)
                             }
                         )
                     }
-                    composable<SearchBook> { backStackEntry ->
-                        val book = backStackEntry.toRoute<SearchBook>()
+                    composable<DetailRoute> { backStackEntry ->
+                        //默认获取第一个显示
+                        val book = backStackEntry.toRoute<DetailRoute>()
 
                         // 通过 Koin 传入参数获取独立的 ViewModel
-                        val viewModel = koinInject<DetailViewModel> { parametersOf(book.ruleId, book.detailUrl) }
+                        // val viewModel = koinInject<DetailViewModel> { parametersOf(book.ruleId, book.detailUrl) }
 
                         DetailScreen(
-                            viewModel = viewModel,
-                            onBack = { navController.popBackStack() },
-                            onChapterClick = { book ->
-                                navController.navigate(book)
+                            detailUrl = book.detailUrl,
+                            ruleId = book.ruleId,
+                            viewModel = koinViewModel<DetailViewModel> {
+                                parametersOf(book.detailUrl,book.ruleId)
+                            },
+                            onNavigateBack = { navController.popBackStackSafe() },
+                            onNavigateToReader = { readerRoute ->
+                                navController.navigate(readerRoute)
                             }
                         )
                     }
-                    composable<Book> { backStackEntry ->
-                        val book = backStackEntry.toRoute<Book>()
-                        // 【关键】：使用 koinViewModel 并通过 parametersOf 传入三个参数
-                        val viewModel = koinViewModel<ReaderViewModel> {
-                            parametersOf(book)
-                        }
+                    composable<ReaderRoute> { backStackEntry ->
+                        val book = backStackEntry.toRoute<ReaderRoute>()
 
-                        ReaderScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+                        val viewModel = koinViewModel<ReaderViewModel>()
+
+                        ReaderScreen(bookUrl = book.bookUrl, chapterIndex = book.chapterIndex, ruleId = book.ruleId, viewModel = viewModel, onNavigateBack = { navController.popBackStackSafe() })
                     }
                 }
 
@@ -200,4 +231,21 @@ fun RuleSelectDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+/**
+ * 💡 终极安全退栈扩展：100% 物理性防连点、防双击白屏！
+ * 它在底层会智能判断当前的导航生命周期。如果已经回到了首页（栈底），
+ * 无论你连点、手抖触发了多少次返回，它都会坚固地进行拦截，绝对不会让屏幕变白！
+ */
+fun NavController.popBackStackSafe(): Boolean {
+    val currentDestId = currentBackStackEntry?.destination?.id
+    val startDestId = graph.findStartDestination().id
+
+    // 💡 核心防线：如果当前已经是首页（栈底）了，强行拦截，绝不退栈！
+    if (currentDestId == startDestId) {
+        println("Navigation-Safe: 已在首页栈底，拦截多余的退栈指令，防止白屏！")
+        return false
+    }
+    return popBackStack()
 }

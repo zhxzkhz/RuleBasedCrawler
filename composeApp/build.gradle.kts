@@ -93,11 +93,15 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0") // 💡 协程测试库
+            implementation("app.cash.turbine:turbine:1.1.0") // 💡 CashApp 出品的极简 Flow 测试库
+            implementation("io.ktor:ktor-server-netty:3.1.1")
         }
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutinesSwing)
             implementation("ch.qos.logback:logback-classic:1.4.14")
+            implementation("org.fusesource.jansi:jansi:2.4.1")
         }
     }
 }

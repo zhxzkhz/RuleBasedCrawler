@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BookDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun addToBookshelf(book: BookEntity)
 
     @Query("SELECT * FROM books ORDER BY updateTime DESC")
@@ -16,10 +16,13 @@ interface BookDao {
     fun getBookFlow(url: String): Flow<BookEntity?>
 
     @Query("SELECT * FROM books WHERE detailUrl = :url")
-    suspend fun getBook(url: String): BookEntity?
+    suspend fun getBookByUrl(url: String): BookEntity?
 
     @Delete
     suspend fun removeFromBookshelf(book: BookEntity)
+
+    @Query("DELETE FROM books WHERE detailUrl = :url")
+    suspend fun deleteBookByUrl(url: String)
 
     /**
      * 更新阅读进度
@@ -40,18 +43,14 @@ interface BookDao {
             updateTime = :updateTime
         WHERE detailUrl = :bookUrl
     """)
-    suspend fun updateLastRead(
+    suspend fun updateReadProgress(
         bookUrl: String,
         chapterIndex: Int,
+        pageIndex: Int,
         chapterTitle: String,
         chapterUrl: String,
-        pageIndex: Int,
         updateTime: Long = System.currentTimeMillis()
     )
-
-    // 1. 批量保存目录
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertChapters(chapters: List<ChapterEntity>)
 
     // 2. 响应式获取某本书的目录
     @Query("SELECT * FROM chapters WHERE bookUrl = :bookUrl ORDER BY indexNum ASC")

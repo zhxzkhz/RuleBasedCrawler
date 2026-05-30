@@ -7,9 +7,12 @@ import com.zhhz.spider.util.JsExtensionClass
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import org.mozilla.javascript.Context
+import org.mozilla.javascript.ContextFactory
 import org.mozilla.javascript.RhinoException
 import java.util.regex.Pattern
 import javax.script.ScriptEngine
+import javax.script.ScriptException
 import javax.script.SimpleBindings
 
 private val logger = KotlinLogging.logger {}
@@ -124,15 +127,17 @@ object RuleParser {
                 bindings["root"] = root  // 【新增】根数据，JS 里可以用 root.xxx 访问原始 HTML
                 try {
                     JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(step.rule, bindings))
-                }  catch (e: RhinoException){
+                }  catch (e: ScriptException){
                     val errorDetail = """
                     JS执行失败！
-                    错误原因: ${e.details()}
-                    错误行号: ${e.lineNumber()}
-                    错误源码: ${e.lineSource()}
-                    错误堆栈: ${e.scriptStackTrace}
-                    """.trimIndent()
+                    执行代码: ${step.rule}
+                    错误原因: ${e.message}
+                    错误行号: ${e.lineNumber}
+                    错误源码: ${e.columnNumber}
+                    错误堆栈: ${e.stackTrace.joinToString("\n")}
+                    """.lines().joinToString("\n") { it.trimStart() }
                     logger.error { errorDetail }
+                    throw e
                 }
 
             }

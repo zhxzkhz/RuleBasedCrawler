@@ -1,183 +1,343 @@
 package com.zhhz.spider.ui.screen
 
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhhz.spider.network.Book
-import com.zhhz.spider.network.BookDetail
+import com.zhhz.spider.ReaderRoute
 import com.zhhz.spider.ui.widget.BookCover
 import com.zhhz.spider.ui.widget.ChapterListItem
-import com.zhhz.spider.ui.widget.DetailLoadingPlaceholder
-import com.zhhz.spider.viewModel.DetailUiState
+import com.zhhz.spider.viewModel.DetailUiEffect
+import com.zhhz.spider.viewModel.DetailUiIntent
 import com.zhhz.spider.viewModel.DetailViewModel
-import com.zhhz.spider.viewModel.Resource
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
-import rulebasedcrawler.composeapp.generated.resources.arrow_back_24dp
-import rulebasedcrawler.composeapp.generated.resources.bookmark_add_24dp
-import rulebasedcrawler.composeapp.generated.resources.bookmark_added_24dp
+import rulebasedcrawler.composeapp.generated.resources.arrow_back_24px
+import rulebasedcrawler.composeapp.generated.resources.check_24px
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailScreen(
+    detailUrl: String,
+    ruleId: String,
     viewModel: DetailViewModel,
-    onBack: () -> Unit,
-    onChapterClick: (Book) -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToReader: (ReaderRoute) -> Unit
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    val isSyncing by viewModel.isSyncing.collectAsState()
-    val currentBook by viewModel.bookInLibrary.collectAsState()
-    val detailState by viewModel.detailState.collectAsState()
-    val catalogState by viewModel.uiCatalogState.collectAsState()
+    // 💡 新增：用于控制“换源对话框”显示的本地状态
+    var showSourceDialog by remember { mutableStateOf(false) }
 
-    // 使用 Scaffold 提供标准的顶部导航和全局背景色
+    LaunchedEffect(detailUrl, ruleId) {
+        viewModel.processIntent(DetailUiIntent.LoadDetail(detailUrl, ruleId))
+    }
+
+    // 副作用监听
+    LaunchedEffect(Unit) {
+        viewModel.uiEffect.collect { effect ->
+            when (effect) {
+                is DetailUiEffect.ShowToast -> {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    launch { snackbarHostState.showSnackbar(effect.message) }
+                }
+                is DetailUiEffect.NavigateToReader -> {
+                    // 跳转到阅读器
+                    onNavigateToReader(effect.route)
+                }
+                is DetailUiEffect.NavigateBack -> {
+                    onNavigateBack()
+                }
+            }
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("书籍详情", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                title = { Text("书籍详情", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(painterResource(Res.drawable.arrow_back_24dp), null) }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                    IconButton(onClick = { viewModel.processIntent(DetailUiIntent.NavigateBack) }) {
+                        Icon(painterResource(Res.drawable.arrow_back_24px), "返回", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
             )
-        },
-        containerColor = Color(0xFFF7F7F7) // 全局浅灰底色，让白色卡片更突出
+        }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding)
+        // 💡 整体使用一个干净的 Column 容器
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
         ) {
-            // --- 1. 信息区 (白色卡片承载) ---
-            item {
-                Surface(
-                    color = Color.White,
-                    shadowElevation = 1.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    when (val state = detailState) {
-                        is DetailUiState.Loading -> DetailLoadingPlaceholder()
-                        is DetailUiState.Error -> RetryView(state.message) { viewModel.loadBookDetail() }
-                        is DetailUiState.Success -> {
-                            BookHeaderSection(
-                                detail = state.detail,
-                                // 逻辑修正：这里应该是“是否在书架”
-                                isRead = currentBook != null,
-                                onAddClick = { viewModel.addToBookshelf(state.detail) }
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f) // 占满剩余高度
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(20.dp)
+            ) {
+                // 1. 书籍基本信息头部
+                item {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        BookCover(
+                            url = uiState.cover,
+                            modifier = Modifier
+                                .width(110.dp)
+                                .height(150.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.width(20.dp))
+                        Column(
+                            modifier = Modifier.height(150.dp),
+                            verticalArrangement = Arrangement.SpaceBetween // 均匀分布
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = uiState.title.ifBlank { "正在获取书名..." },
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "作者：${uiState.author.ifBlank { "未知" }}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                                )
+                                Text(
+                                    text = "状态：${uiState.status.ifBlank { "未知" }}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                                )
+                            }
+
+                            // 展示最新章节
+                            if (uiState.latestChapterTitle.isNotBlank()) {
+                                Text(
+                                    text = "最新：${uiState.latestChapterTitle}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
+
+                item {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Card(
+                        // 点击直接拉起换源对话框
+                        onClick = { showSourceDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "当前书源",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                                Text(
+                                    text = uiState.currentSource?.sourceName ?: "默认书源",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            // 右侧气泡提示
+                            Surface(
+                                shape = RoundedCornerShape(100.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            ) {
+                                Text(
+                                    text = "共 ${uiState.availableSources.size} 个源 〉",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2. 💡 黄金交互：并排的双按钮操作组（美观且标准）
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // 开始阅读（主按钮）
+                        Button(
+                            onClick = { viewModel.processIntent(DetailUiIntent.GoToReader) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("开始阅读", fontWeight = FontWeight.Bold)
+                        }
+
+                        // 加入/移出书架（辅助按钮）
+                        OutlinedButton(
+                            onClick = { viewModel.processIntent(DetailUiIntent.ToggleBookshelf) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = if (uiState.isInBookshelf) "移出书架" else "加入书架",
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    HorizontalDivider(
+                        Modifier,
+                        DividerDefaults.Thickness,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
                 }
-            }
 
-            // --- 2. 简介区 (如果有简介规则) ---
-            if (detailState is DetailUiState.Success) {
-                val detail = (detailState as DetailUiState.Success).detail
+                // 3. 简介区域
                 item {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("简介", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = detail.desc.ifBlank { "暂无简介内容" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.Gray,
-                            lineHeight = 20.sp
+                    Text(
+                        text = "简介",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                    Text(
+                        text = uiState.desc.ifBlank { "暂无简介信息" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                        lineHeight = 22.sp,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    HorizontalDivider(
+                        Modifier,
+                        DividerDefaults.Thickness,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                }
+
+                // 4. 目录标题
+                item {
+                    Text(
+                        text = "目录 (${uiState.chapters.size} 章)",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                }
+
+                // 5. 目录列表加载状态与渲染
+                if (uiState.isCatalogLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                } else {
+                    items(uiState.chapters) { chapter ->
+                        ChapterListItem(
+                            chapter = chapter,
+                            onClick = { viewModel.processIntent(DetailUiIntent.ChapterClicked(chapter)) }
                         )
                     }
                 }
             }
+        }
+    }
 
-            // --- 3. 目录标题区 (使用 stickyHeader 悬停效果更专业) ---
-            stickyHeader {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFFF7F7F7)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("章节列表", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-                    }
-                }
-            }
+    if (showSourceDialog && uiState.availableSources.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showSourceDialog = false },
+            title = {
+                Text(
+                    text = "切换书源",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                // 限制对话框最大高度，防止书源过多时撑爆屏幕
+                Box(modifier = Modifier.heightIn(max = 300.dp)) {
+                    LazyColumn {
+                        items(uiState.availableSources) { source ->
+                            val isCurrent = source.ruleId == uiState.currentSource?.ruleId &&
+                                    source.url == uiState.currentSource?.url
 
-            when (val state = catalogState) {
-                is Resource.Loading -> {
-                    item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                }
-                is Resource.Error -> {
-                    item {
-                        Column(
-                            Modifier.fillMaxWidth().padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text("目录加载失败: ${state.message}", color = Color.Red)
-                            TextButton(onClick = { viewModel.loadCatalog() }) { Text("重试") }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        // 💡 发送换源意图给 ViewModel！
+                                        viewModel.processIntent(DetailUiIntent.ChangeSource(source))
+                                        showSourceDialog = false // 关闭弹窗
+                                    }
+                                    .padding(vertical = 12.dp, horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = source.sourceName,
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 16.sp
+                                )
+                                if (isCurrent) {
+                                    Icon(
+                                        painter = painterResource(Res.drawable.check_24px),
+                                        contentDescription = "当前源",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-                is Resource.Success -> {
-                    // 渲染列表
-                    itemsIndexed(state.data) { index, chapter ->
-                        ChapterListItem(
-                            chapter = chapter,
-                            // 直接使用 currentBook 的信息对比
-                            isRead = (chapter.index == index),
-                            onClick = {
-                                // 传入当前阅读上下文
-                                onChapterClick(viewModel.getBook().copy(lastReadChapterIndex = index))
-                            }
-                        )
-                    }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSourceDialog = false }) {
+                    Text("取消", color = MaterialTheme.colorScheme.primary)
                 }
             }
-
-            // 底部留白
-            item { Spacer(Modifier.height(32.dp)) }
-        }
+        )
     }
-}
 
-@Composable
-fun RetryView(message: String, onRetry: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(message, color = Color.Red, fontSize = 14.sp)
-            Button(onClick = onRetry, modifier = Modifier.padding(top = 8.dp)) { Text("重新加载信息") }
-        }
-    }
-}
-
-@Composable
-fun BookHeaderSection(detail: BookDetail, isRead: Boolean, onAddClick: () -> Unit) {
-    Row(Modifier.padding(16.dp).fillMaxWidth()) {
-        Card(Modifier.size(100.dp, 140.dp), elevation = CardDefaults.cardElevation(4.dp)) {
-            BookCover(url = detail.cover)
-        }
-        Column(Modifier.padding(start = 16.dp)) {
-            Text(detail.title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(detail.author, color = Color.Gray, fontSize = 14.sp)
-            Spacer(Modifier.weight(1f))
-            Button(onClick = onAddClick) {
-                if (isRead) {
-                    Icon(painterResource(Res.drawable.bookmark_added_24dp), null)
-                    Text(" 移除书架")
-                } else {
-                    Icon(painterResource(Res.drawable.bookmark_add_24dp), null)
-                    Text(" 加入书架")
-                }
-            }
-        }
-    }
 }

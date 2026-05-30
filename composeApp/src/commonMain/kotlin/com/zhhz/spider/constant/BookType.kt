@@ -7,12 +7,12 @@ object BookType {
     /**
      * 2 文本
      */
-    const val text = 0b1
+    const val text = 0b10
 
     /**
      * 4 图片
      */
-    const val image = 0b10
+    const val image = 0b100
 
     /**
      * 8 文本

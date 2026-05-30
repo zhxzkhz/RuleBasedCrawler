@@ -11,19 +11,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhhz.spider.db.RuleEntity
+import com.zhhz.spider.network.SearchBookSource
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.filter_list_24px
 
 @Composable
-fun SourceSelectorRow(rules: List<RuleEntity>, selectedId: String?,onOpen: (Boolean) -> Unit, onSelect: (RuleEntity) -> Unit) {
+fun SourceSelectorRow(sources:  List<SearchBookSource>, currentSource: SearchBookSource?, onSourceSelected: (SearchBookSource) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
 
-        OutlinedButton(onClick = { onOpen(true) }) { Text("编辑") }
+        //OutlinedButton(onClick = { onOpen(true) }) { Text("编辑") }
 
         Spacer(Modifier.width(12.dp))
 
@@ -32,11 +32,11 @@ fun SourceSelectorRow(rules: List<RuleEntity>, selectedId: String?,onOpen: (Bool
         Text("选择来源:", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
 
         LazyRow(Modifier.weight(1f).padding(start = 8.dp)) {
-            items(rules) { rule ->
-                val isSelected = rule.id == selectedId
+            items(sources) { source ->
+                val isSelected = source.ruleId == currentSource?.ruleId
                 SuggestionChip(
-                    onClick = { onSelect(rule) },
-                    label = { Text(rule.name, fontSize = 11.sp) },
+                    onClick = { onSourceSelected(source) },
+                    label = { Text(source.sourceName, fontSize = 11.sp) },
                     modifier = Modifier.padding(end = 6.dp),
                     colors = SuggestionChipDefaults.suggestionChipColors(
                         containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,

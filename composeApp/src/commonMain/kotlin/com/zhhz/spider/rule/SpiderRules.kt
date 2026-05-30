@@ -5,6 +5,9 @@ import com.alibaba.fastjson2.JSONReader
 import com.alibaba.fastjson2.annotation.JSONField
 import com.alibaba.fastjson2.annotation.JSONType
 import com.zhhz.spider.db.RuleEntity
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.*
 import kotlin.time.Clock
 
@@ -21,6 +24,7 @@ enum class StepType {
 /**
  * 基础解析原子单位：步骤
  */
+@Serializable
 data class ParseStep(
     val type: StepType = StepType.CSS,
     val rule: String = "",
@@ -42,6 +46,7 @@ enum class ExtractType {
 /**
  * 复合选择器：支持步骤链和备选方案
  */
+@Serializable
 data class Selector(
     val steps: List<ParseStep> = emptyList(),
     val fallback: Selector? = null,
@@ -51,6 +56,7 @@ data class Selector(
 /**
  * 网络请求配置模板（支持 {{var}} 占位符）
  */
+@Serializable
 data class FetchConfig(
     var method: String? = null,         // 为空则继承全局
     var charset: String? = null,
@@ -72,6 +78,7 @@ interface IPage {
 /**
  * 搜索页：封装搜索逻辑
  */
+@Serializable
 data class SearchPage(
     override val config: FetchConfig = FetchConfig(),
     override val urlSelector: Selector = Selector(),
@@ -103,6 +110,7 @@ data class SearchPage(
 /**
  * 目录页：获取章节地址
  */
+@Serializable
 data class CatalogPage(
     override val config: FetchConfig = FetchConfig(),
     override val urlSelector: Selector = Selector(), // 如果目录和详情在同一页，这里留空
@@ -119,6 +127,7 @@ data class CatalogPage(
 /**
  * 详情页：封装目录获取逻辑
  */
+@Serializable
 data class DetailPage(
     override val config: FetchConfig = FetchConfig(),
     override val urlSelector: Selector = Selector(),
@@ -140,22 +149,29 @@ data class DetailPage(
 /**
  * 正文页：封装内容提取逻辑
  */
+@Serializable
 data class ContentPage(
     override val config: FetchConfig = FetchConfig(),
     override val urlSelector: Selector = Selector(),
     val contentSelector: Selector = Selector(),
     val nextUrlSelector: Selector = Selector(),
+    //图片头部
+    val imageHeaders: Selector = Selector(),
     val decryptImage: String = "",
     val regexReplaceSelector: Selector = Selector()
 ) : IPage {
+    fun getReaderUrl(text: String, ctx: VariableContext ) = RuleParser.parseString(text, urlSelector, ctx)
+
     fun getContent(text: String, ctx: VariableContext): List<Any> {
         return RuleParser.parseList(text, contentSelector, ctx)
     }
+
 }
 
 /**
  * 登录页：专门负责获取凭证
  */
+@Serializable
 data class LoginPage(
     override val config: FetchConfig = FetchConfig(method = "POST"), // 默认 POST
     override val urlSelector: Selector = Selector(),                // 登录 API 地址
@@ -171,11 +187,12 @@ data class LoginPage(
  * 顶层规则对象 (JSON 导入/导出的直接目标)
  */
 @JSONType(orders = ["id", "name", "url", "concurrentRate", "proxyUrl", "customDns", "useCache", "globalConfig", "requireLogin", "login", "search", "detail", "catalog", "content"])
+@Serializable
 data class SourceRule(
     val id: String = UUID.randomUUID().toString(),
     var name: String = "",
     var url: String = "",
-    var type: String = "",
+    var type: Int = 0,
     var concurrentRate: Long = 1000,
     var proxyUrl: String? = null,
     var customDns: String? = null, // 1. DNS服务器: "8.8.8.8,8.8.4.4" 以逗号分割
@@ -188,24 +205,39 @@ data class SourceRule(
     val detail: DetailPage = DetailPage(),
     val catalog: CatalogPage = CatalogPage(),
     val content: ContentPage = ContentPage()
-) {
-    @JSONField(serialize = false, deserialize = false)
-    val ctx: VariableContext = mutableMapOf()
-}
+)
 
 data class TagAction(val useCache: Boolean)
 
+// 💡 1. 纯净的 Kotlin 扩展函数，支持任意子集的闭环切换
+fun StepType.nextIn(allowedTypes: List<StepType>): StepType {
+    if (allowedTypes.isEmpty()) {
+        return StepType.entries[(this.ordinal + 1) % StepType.entries.size]
+    }
 
-fun SourceRule.toEntity(): RuleEntity {
+    // 2. 找到当前类型在子集中的索引
+    val currentIndex = allowedTypes.indexOf(this)
+
+    // 💡 3. 如果当前类型不在子集里（比如目前是 CSS，但点击后要进入子集）
+    // indexOf 会返回 -1，此时 (-1 + 1) % size = 0，会自动安全地跳转到子集的第一项！
+    val nextIndex = (currentIndex + 1) % allowedTypes.size
+
+    return allowedTypes[nextIndex]
+}
+
+fun SourceRule.toEntity(isEnabled: Boolean = true): RuleEntity {
     // 如果没有 ID，生成一个（这里建议在规则创建时分配）
     val finalId = this.id.ifBlank { Clock.System.now().toEpochMilliseconds().toString() }
     return RuleEntity(
         id = finalId,
         name = this.name,
-        jsonContent = JSON.toJSONString(this.copy())
+        //jsonContent = JSON.toJSONString(this.copy()),
+        jsonContent = Json.encodeToString<SourceRule>(this),
+        isEnabled = isEnabled,
     )
 }
 
 fun RuleEntity.toDomain(): SourceRule {
-    return JSON.parseObject(this.jsonContent, SourceRule::class.java, JSONReader.Feature.FieldBased)
+    return Json.decodeFromString<SourceRule>(jsonContent)
+    //return JSON.parseObject(this.jsonContent, SourceRule::class.java, JSONReader.Feature.FieldBased)
 }

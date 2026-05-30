@@ -18,10 +18,21 @@ import androidx.compose.ui.unit.sp
 import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.JSONWriter
 import com.zhhz.spider.rule.SourceRule
+import com.zhhz.spider.viewModel.MangaImage
 import kotlinx.coroutines.Job
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.play_arrow_24px
+
+// 💡 1. 声明一个极度宽容、抗揍的爬虫专用序列化配置
+val safeJson = Json {
+    ignoreUnknownKeys = true // 💡 核心：忽略未知字段！JSON 里多出什么牛鬼蛇神字段都不会报错，直接跳过！
+    coerceInputValues = true // 如果类型不对（比如本来是数字却传了空字符串），自动进行类型保底
+    isLenient = true         // 宽容模式，允许格式不那么规范的 JSON
+    prettyPrint = true      // 格式化输出，方便调试
+}
 
 enum class RunMode(val label: String, val color: Color) {
     STEP_RUN("⚡ 全链路连跑", Color(0xFF673AB7)),
@@ -99,6 +110,7 @@ fun TopBarSection(
         OutlinedButton(onClick = {
             isExport = true
             jsonStr = JSON.toJSONString(currentRule, JSONWriter.Feature.PrettyFormat)
+            jsonStr = safeJson.encodeToString(currentRule )//JSON.toJSONString(currentRule, JSONWriter.Feature.PrettyFormat)
             showJsonDialog = true
         }) { Text("导出") }
 
@@ -178,7 +190,8 @@ fun TopBarSection(
                 },
                 confirmButton = { Button(onClick = { showJsonDialog = false }) { Text("关闭") } },
                 dismissButton = { Button(onClick = {
-                    onRuleChange(JSON.parseObject<SourceRule>(jsonStr, SourceRule::class.java))
+                    onRuleChange(safeJson.decodeFromString<SourceRule>(jsonStr))
+                    //onRuleChange(JSON.parseObject<SourceRule>(jsonStr, SourceRule::class.java))
                     showJsonDialog = false
                 }) { Text("导入") } }
             )

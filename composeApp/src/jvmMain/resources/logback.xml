@@ -1,0 +1,21 @@
+<configuration>
+    <!-- 💡 配置控制台输出 -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- 💡 核心重点：在 Windows 平台上完美渲染 ANSI 颜色，开启 withJansi -->
+        <withJansi>true</withJansi>
+        <encoder>
+            <!-- 💡 核心高亮：
+                 - %d{...} 灰色时间
+                 - %highlight(%-5level) 级别高亮：ERROR 变红、WARN 变黄、INFO 变绿
+                 - %cyan(...) 线程与类名变青色
+                 - %msg 日志内容
+            -->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %gray([%thread]) %highlight(%-5level) %cyan(%logger{15}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 设置日志级别（可以根据你的需要改成 DEBUG 或 INFO） -->
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+    </root>
+</configuration>

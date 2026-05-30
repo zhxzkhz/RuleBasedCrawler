@@ -49,7 +49,12 @@ class FetchTaskRunner(
      * @param input 关键变量：搜索页为“关键字”，其他页为“目标 URL”
      * @param ctx 变量上下文
      */
-    suspend fun fetch(source: SourceRule, page: IPage, input: String, ctx: VariableContext, cacheHtml: String? = null): String {
+    suspend fun fetch(source: SourceRule, page: IPage, input: String, ctx: VariableContext , cacheHtml: String? = null): String {
+
+        if (page.urlSelector.steps.isEmpty() && cacheHtml != null && input.isBlank()) {
+            logger.info { "检测到无 URL 规则且存在缓存 HTML，直接透传" }
+            return cacheHtml
+        }
 
         // 1. 只有声明了“需要登录”，才去碰 Session 逻辑
         if (source.requireLogin && page !is LoginPage) {
@@ -73,11 +78,6 @@ class FetchTaskRunner(
                     // return "ERROR: REQUIRE_LOGIN"
                 }
             }
-        }
-
-        if (page.urlSelector.steps.isEmpty() && cacheHtml != null && input.isBlank()) {
-            logger.info { "检测到无 URL 规则且存在缓存 HTML，直接透传" }
-            return cacheHtml
         }
 
         val global = source.globalConfig
@@ -123,14 +123,16 @@ class FetchTaskRunner(
         bindings["java_log"] = logger
         bindings["value"] = input
 
+
         // 2. 执行动态 Header 脚本
         val script = local.headerScript ?: global.headerScript
         if (!script.isNullOrBlank()) {
 
-            // 执行 JS，约定脚本返回一个 JSON 字符串，例如: '{"Token": "abc", "Time": "123"}'
-            val jsonResult = SCRIPT_ENGINE.eval(script, bindings)
-            logger.debug { "JSON RESULT: $jsonResult" }
+            var jsonResult: Any
             try {
+                // 执行 JS，约定脚本返回一个 JSON 字符串，例如: '{"Token": "abc", "Time": "123"}'
+                jsonResult = SCRIPT_ENGINE.eval(script, bindings)
+                logger.debug { "JSON RESULT: $jsonResult" }
                 // 解析并合并到请求头中
                 val dynamicHeaders = JSON.parseObject(jsonResult.toString(), Map::class.java) as Map<*, *>
                 // 2. 安全地合并到 finalHeaders
@@ -141,7 +143,7 @@ class FetchTaskRunner(
                     }
                 }
             } catch (e: Exception) {
-                logger.error { "Header 脚本返回格式错误: $jsonResult" }
+                logger.error { "Header 脚本返回格式错误: $e" }
             }
         }
 
@@ -171,7 +173,7 @@ class FetchTaskRunner(
         bindings["java_request"] = req
 
 
-        logger.info { "发起请求 -> [${page::class.simpleName}] URL: $finalUrl  BODY: $finalBody" }
+        logger.info { "发起请求 -> [${page::class.simpleName}] URL: $finalUrl  POST_BODY: $finalBody" }
         var rawResponse = httpFetcher.fetch(source.id, source.concurrentRate, req)
         bindings["value"] = rawResponse
 
@@ -179,7 +181,12 @@ class FetchTaskRunner(
         if (!responseScript.isNullOrBlank()) {
             // 调用 JS 引擎执行解密
             // 约定：输入变量名为 'raw'，输出为脚本最后一行或 return 值
-            rawResponse = JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(responseScript, bindings)).toString()
+            try {
+                rawResponse = JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(responseScript, bindings)).toString()
+            } catch (e: Exception) {
+                logger.error { e }
+            }
+
         }
         return rawResponse
     }

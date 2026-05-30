@@ -6,22 +6,38 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.koin.android.ext.koin.androidContext
+import org.mozilla.javascript.Context
+import org.mozilla.javascript.ContextFactory
+import java.lang.reflect.Constructor
+import java.lang.reflect.Field
 
-object Static {
+
+class MainActivity : ComponentActivity() {
+
     init {
         System.setProperty("kotlin-logging-to-android-native", "true")
     }
-}
-private val static = Static
 
-private val logger = KotlinLogging.logger {}
-
-class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        try {
+            val clazz = Class.forName("com.sun.script.javascript.RhinoClassShutter")
+
+            val method = clazz.getDeclaredMethod("getInstance")
+            method.isAccessible = true
+            method.invoke(null)
+
+            val privateField: Field = clazz.getDeclaredField("protectedClasses") // 替换为真实的私有字段名
+            privateField.isAccessible = true // 解锁
+
+            (privateField.get(null) as HashMap<*, *>).remove("java.lang.Class")
+        } catch (e: Exception) {
+            // 没有该字段
+            e.printStackTrace()
+        }
 
         setContent {
             App(koinConfig = {
@@ -30,10 +46,4 @@ class MainActivity : ComponentActivity() {
             })
         }
     }
-}
-
-@Preview
-@Composable
-fun AppAndroidPreview() {
-    App()
 }

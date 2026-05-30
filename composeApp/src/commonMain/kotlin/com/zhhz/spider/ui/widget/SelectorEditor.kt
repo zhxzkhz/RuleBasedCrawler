@@ -20,28 +20,54 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhhz.spider.rule.ParseStep
 import com.zhhz.spider.rule.Selector
+import com.zhhz.spider.rule.StepType
 import com.zhhz.spider.ui.JsEditContext
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.list_24px
 
 @Composable
-fun SelectorEditor1(title: String, selector: Selector, level: Int = 0, onSelectorChange: (Selector) -> Unit, onOpenJsEditor: (JsEditContext) -> Unit) {
+fun SelectorEditor1(
+    title: String,
+    selector: Selector,
+    level: Int = 0,
+    onSelectorChange: (Selector) -> Unit,
+    onOpenJsEditor: (JsEditContext) -> Unit
+) {
     val bgColor = if (level == 0) Color(0xFFFAFAFA) else Color(0xFFFFF8E1)
-    Card(colors = CardDefaults.cardColors(containerColor = bgColor), border = BorderStroke(1.dp, if (level == 0) Color.LightGray else Color(0xFFFFB74D)), modifier = Modifier.fillMaxWidth().padding(start = (level * 16).dp)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = bgColor),
+        border = BorderStroke(1.dp, if (level == 0) Color.LightGray else Color(0xFFFFB74D)),
+        modifier = Modifier.fillMaxWidth().padding(start = (level * 16).dp)
+    ) {
         Column(Modifier.padding(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (level == 0) Icon(painterResource(Res.drawable.list_24px), null, modifier = Modifier.size(16.dp), tint = Color.Blue) else Text("↳", fontSize = 16.sp, color = Color(0xFFFF9800))
+                if (level == 0) Icon(
+                    painterResource(Res.drawable.list_24px),
+                    null,
+                    modifier = Modifier.size(16.dp),
+                    tint = Color.Blue
+                ) else Text("↳", fontSize = 16.sp, color = Color(0xFFFF9800))
                 Spacer(Modifier.width(8.dp))
-                Text(if (level == 0) title else "备选规则", fontWeight = FontWeight.Bold, fontSize = if (level == 0) 14.sp else 13.sp)
+                Text(
+                    if (level == 0) title else "备选规则",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (level == 0) 14.sp else 13.sp
+                )
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp), DividerDefaults.Thickness, DividerDefaults.color)
 
             selector.steps.forEachIndexed { index, step ->
                 StepRow(
                     index = index, step = step,
-                    onStepChange = { newStep -> val s = selector.steps.toMutableList(); s[index] = newStep; onSelectorChange(selector.copy(steps = s)) },
-                    onDelete = { val s = selector.steps.toMutableList(); s.removeAt(index); onSelectorChange(selector.copy(steps = s)) },
+                    onStepChange = { newStep ->
+                        val s = selector.steps.toMutableList(); s[index] =
+                        newStep; onSelectorChange(selector.copy(steps = s))
+                    },
+                    onDelete = {
+                        val s =
+                            selector.steps.toMutableList(); s.removeAt(index); onSelectorChange(selector.copy(steps = s))
+                    },
                     onOpenJsEditor = onOpenJsEditor
                 )
                 Spacer(Modifier.height(4.dp))
@@ -89,10 +115,21 @@ fun SelectorEditor1(title: String, selector: Selector, level: Int = 0, onSelecto
 
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { onSelectorChange(selector.copy(steps = selector.steps + ParseStep())) }, modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 8.dp), colors = ButtonDefaults.buttonColors(Color.White)) { Text("+ 步骤", fontSize = 11.sp, color = Color.Black) }
+                Button(
+                    onClick = { onSelectorChange(selector.copy(steps = selector.steps + ParseStep())) },
+                    modifier = Modifier.height(28.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    colors = ButtonDefaults.buttonColors(Color.White)
+                ) { Text("+ 步骤", fontSize = 11.sp, color = Color.Black) }
                 Spacer(Modifier.width(16.dp))
                 Text("失败默认值:", fontSize = 11.sp, color = Color.Gray)
-                BasicTextField(value = selector.defaultValue, onValueChange = { onSelectorChange(selector.copy(defaultValue = it)) }, modifier = Modifier.width(100.dp).background(Color.White).border(1.dp, Color.LightGray).padding(4.dp), textStyle = TextStyle(fontSize = 11.sp))
+                BasicTextField(
+                    value = selector.defaultValue,
+                    onValueChange = { onSelectorChange(selector.copy(defaultValue = it)) },
+                    modifier = Modifier.width(100.dp).background(Color.White).border(1.dp, Color.LightGray)
+                        .padding(4.dp),
+                    textStyle = TextStyle(fontSize = 11.sp)
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -102,20 +139,53 @@ fun SelectorEditor1(title: String, selector: Selector, level: Int = 0, onSelecto
                     selector.fallback,
                     level + 1,
                     { onSelectorChange(selector.copy(fallback = it)) },
-                            onOpenJsEditor)
+                    onOpenJsEditor
+                )
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton(onClick = { onSelectorChange(selector.copy(fallback = null)) }, modifier = Modifier.height(36.dp)) { Text("🗑 删除备选", modifier = Modifier.height(40.dp).padding(0.dp), color = Color.Red, fontSize = 11.sp) } }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        onClick = { onSelectorChange(selector.copy(fallback = null)) },
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text(
+                            "🗑 删除备选",
+                            modifier = Modifier.height(40.dp).padding(0.dp),
+                            color = Color.Red,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
             } else {
-                OutlinedButton(onClick = { onSelectorChange(selector.copy(fallback = Selector())) }, modifier = Modifier.fillMaxWidth().height(36.dp), border = BorderStroke(1.dp, Color(0xFFFFB74D).copy(0.5f))) { Text("↳ 添加备选策略", color = Color(0xFFEF6C00), fontSize = 11.sp) }
+                OutlinedButton(
+                    onClick = { onSelectorChange(selector.copy(fallback = Selector())) },
+                    modifier = Modifier.fillMaxWidth().height(36.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFFB74D).copy(0.5f))
+                ) { Text("↳ 添加备选策略", color = Color(0xFFEF6C00), fontSize = 11.sp) }
             }
         }
     }
 }
+
 @Composable
 fun SelectorEditor(
     title: String,
     selector: Selector,
     level: Int = 0, // 用于递归缩进
+    onOpenJsEditor: (JsEditContext) -> Unit,
+    onSelectorChange: (Selector) -> Unit
+) {
+    SelectorEditor(title, selector, level, emptyList(), onOpenJsEditor, onSelectorChange)
+}
+
+@Composable
+fun SelectorEditor(
+    title: String,
+    selector: Selector,
+    level: Int = 0, // 用于递归缩进
+    typeList: List<StepType>,
     onOpenJsEditor: (JsEditContext) -> Unit,
     onSelectorChange: (Selector) -> Unit
 ) {
@@ -143,6 +213,7 @@ fun SelectorEditor(
                 StepRow(
                     index = index,
                     step = step,
+                    types = typeList,
                     onStepChange = { newStep ->
                         val newList = selector.steps.toMutableList()
                         newList[index] = newStep
@@ -160,7 +231,15 @@ fun SelectorEditor(
 
             // 添加步骤按钮 (对齐 Badge 线下)
             TextButton(
-                onClick = { onSelectorChange(selector.copy(steps = selector.steps + ParseStep())) },
+                onClick = {
+                    onSelectorChange(
+                        selector.copy(
+                            steps = selector.steps + ParseStep(
+                                type = if (typeList.isEmpty()) StepType.CSS else typeList.first()
+                            )
+                        )
+                    )
+                },
                 modifier = Modifier.padding(start = 10.dp).height(32.dp),
                 contentPadding = PaddingValues(horizontal = 4.dp)
             ) {
@@ -212,7 +291,11 @@ fun SelectorEditor(
                         singleLine = true,
                         decorationBox = { inner ->
                             Box(contentAlignment = Alignment.CenterStart) {
-                                if (selector.defaultValue.isEmpty()) Text("NULL", color = Color(0xFFCCCCCC), fontSize = 10.sp)
+                                if (selector.defaultValue.isEmpty()) Text(
+                                    "NULL",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 10.sp
+                                )
                                 inner()
                             }
                         }
