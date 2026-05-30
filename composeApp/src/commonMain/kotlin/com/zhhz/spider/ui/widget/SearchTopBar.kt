@@ -25,8 +25,8 @@ import rulebasedcrawler.composeapp.generated.resources.arrow_back_24px
 fun SearchTopBar(
     keyword: String,
     onKeywordChange: (String) -> Unit,
-    onBack: () -> Unit,
-    onSearch: () -> Unit
+    onBackClick: () -> Unit,
+    onSearchClick: () -> Unit
 ) {
     // 增加一个带背景的容器
     Surface(
@@ -39,7 +39,7 @@ fun SearchTopBar(
             modifier = Modifier.padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onBackClick) {
                 Icon(painterResource(Res.drawable.arrow_back_24px), "返回", tint = Color.DarkGray)
             }
 
@@ -54,12 +54,12 @@ fun SearchTopBar(
                     inner()
                 },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { onSearch() })
+                keyboardActions = KeyboardActions(onSearch = { onSearchClick() })
             )
 
             // 将“搜索”文字改为带背景的小按钮，或者直接用图标
             TextButton(
-                onClick = onSearch,
+                onClick = onSearchClick,
                 modifier = Modifier.padding(end = 4.dp)
             ) {
                 Text("搜索", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)

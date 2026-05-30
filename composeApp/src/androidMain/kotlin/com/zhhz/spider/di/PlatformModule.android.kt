@@ -3,6 +3,7 @@ package com.zhhz.spider.di
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.zhhz.spider.db.AppDatabase
+import okio.Path.Companion.toOkioPath
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
@@ -23,6 +24,18 @@ actual val platformModule = module {
         File(androidContext().cacheDir, "spider_snapshots").apply {
             if (!exists()) mkdirs()
         }
+    }
+
+    single(named("imageCacheDir")) {
+        File(androidContext().cacheDir, "spider_image").apply {
+            if (!exists()) mkdirs()
+        }.toOkioPath()
+    }
+
+    single(named("bookCacheDir")) {
+        File(androidContext().cacheDir, "spider_book").apply {
+            if (!exists()) mkdirs()
+        }.toOkioPath()
     }
 
 }

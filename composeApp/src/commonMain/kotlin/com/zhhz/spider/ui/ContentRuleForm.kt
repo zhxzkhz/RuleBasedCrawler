@@ -28,6 +28,11 @@ fun ContentRuleForm(contentRule: ContentPage?,onOpenJsEditor: (JsEditContext) ->
             SelectorEditor("正文内容", contentRule.contentSelector,onOpenJsEditor = onOpenJsEditor) { onUpdate(contentRule.copy(contentSelector = it)) }
             SelectorEditor("下一页", contentRule.nextUrlSelector,onOpenJsEditor = onOpenJsEditor) { onUpdate(contentRule.copy(nextUrlSelector = it)) }
 
+            SelectorEditor("图片头部（ImageHeader）", contentRule.imageHeaders,0,listOf(StepType.CONSTANT, StepType.SCRIPT),onOpenJsEditor = onOpenJsEditor) {
+                onUpdate(contentRule.copy(imageHeaders = it))
+            }
+
+
             StepRow(
                 index = 0,
                 step = ParseStep(StepType.SCRIPT,contentRule.decryptImage),

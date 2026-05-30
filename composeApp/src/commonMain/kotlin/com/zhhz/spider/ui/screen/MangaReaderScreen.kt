@@ -35,7 +35,7 @@ fun MangaPageList(
     val scrollState = rememberLazyListState()
 
     val context = LocalPlatformContext.current
-    val rule = model.rule
+    val rule: SourceRule = SourceRule()
 
     val headers = NetworkHeaders.Builder().set("X-Internal-Rule-Id", rule.id).build()
     val imageLoader = SingletonImageLoader.get(context)
@@ -45,7 +45,7 @@ fun MangaPageList(
         snapshotFlow { scrollState.firstVisibleItemIndex }
             .distinctUntilChanged()
             .collect { index ->
-                model.saveProgress(pageIndex = index)
+               // model.saveProgress(pageIndex = index)
             }
     }
 
@@ -117,7 +117,7 @@ fun imageRequest(url: String, context: PlatformContext, rule: SourceRule, header
     val preloadRequest = ImageRequest.Builder(context).data(url).size(Size.ORIGINAL)
     preloadRequest.httpHeaders(headers)
     if (rule.content.decryptImage.isNotBlank()) {
-        preloadRequest.transformations(MangaDescrambleTransformation(url, rule))
+        preloadRequest.transformations(MangaDescrambleTransformation(url, rule.id))
     }
 
     val build = preloadRequest.build()

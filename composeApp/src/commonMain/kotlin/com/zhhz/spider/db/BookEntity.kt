@@ -29,6 +29,9 @@ data class BookEntity(
     @ColumnInfo(defaultValue = "0")
     val status: Int = 0,               // 连载状态: 0=连载中, 1=已完结
 
+    @ColumnInfo(defaultValue = "")
+    val catalogUrl: String = "",
+
     // ----------------- 3. 深度阅读进度 -----------------
     @ColumnInfo(defaultValue = "-1")
     val lastReadChapterIndex: Int = -1,
@@ -59,7 +62,7 @@ data class BookEntity(
 )
 
 fun BookEntity.toDomain() = Book(
-    detailUrl = this.detailUrl,
+    url = this.detailUrl,
     title = this.title,
     author = this.author,
     cover = this.cover,

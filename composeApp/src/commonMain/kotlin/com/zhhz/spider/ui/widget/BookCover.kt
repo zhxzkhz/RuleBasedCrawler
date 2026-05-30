@@ -18,7 +18,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
-import rulebasedcrawler.composeapp.generated.resources.broken_image_24dp
+import rulebasedcrawler.composeapp.generated.resources.broken_image_24px
 
 @Composable
 fun BookCover(url: String, modifier: Modifier = Modifier) {
@@ -43,7 +43,7 @@ fun BookCover(url: String, modifier: Modifier = Modifier) {
         error = {
             // 出错后的占位图：显示书名首字母或默认图标
             Box(Modifier.fillMaxSize().background(Color(0xFFEEEEEE))) {
-                Icon(painterResource(Res.drawable.broken_image_24dp), null, Modifier.align(Alignment.Center), tint = Color.Gray)
+                Icon(painterResource(Res.drawable.broken_image_24px), null, Modifier.align(Alignment.Center), tint = Color.Gray)
             }
         }
     )

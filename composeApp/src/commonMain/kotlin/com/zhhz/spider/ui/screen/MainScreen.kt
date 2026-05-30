@@ -28,8 +28,11 @@ import coil3.toBitmap
 import com.zhhz.spider.JsEditorOverlay
 import com.zhhz.spider.RuleSelectDialog
 import com.zhhz.spider.db.RuleDao
-import com.zhhz.spider.manager.RuleManager
+import com.zhhz.spider.manager.ContextSessionManager
+import com.zhhz.spider.manager.getActiveContext
+import com.zhhz.spider.network.Book
 import com.zhhz.spider.network.FetchTaskRunner
+import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.rule.SourceRule
 import com.zhhz.spider.rule.VariableContext
 import com.zhhz.spider.rule.toDomain
@@ -87,18 +90,19 @@ fun MainScreen(currentRule: SourceRule,onRuleChange: (SourceRule) -> Unit, onOpe
         var topInputText by remember { mutableStateOf("") }
 
         val dao = koinInject<RuleDao>()
-        val ruleManager = koinInject<RuleManager>()
+        val sessionRepository = koinInject<SessionRepository>()
+        val contextSessionManager = koinInject< ContextSessionManager>()
         val scope = rememberCoroutineScope()
 
-        val ctx: VariableContext = currentRule.ctx
+        var ctx: VariableContext = mutableMapOf()
 
         val context = LocalPlatformContext.current
 
         val runStepFlow = {
             scope.launch {
-                //val ctx: VariableContext = ctx
+                ctx = contextSessionManager.getContext(currentRule.id)
                 val log = StringBuilder()
-                ruleManager.updateActiveRule(currentRule)
+
                 try {
                     // --- STEP 1: 搜索 ---
                     selectedTabIndex = 2
@@ -118,6 +122,16 @@ fun MainScreen(currentRule: SourceRule,onRuleChange: (SourceRule) -> Unit, onOpe
                         ctx,
                         context
                     )
+
+
+                    sessionRepository.saveData(Book(
+                        url = firstBookUrl,
+                        title = "",
+                        author = "",
+                        cover = "",
+                        ruleId = currentRule.id,
+                    ))
+                    ctx = contextSessionManager.getActiveContext(sessionRepository,currentRule.id)
 
                     // --- STEP 2: 详情 ---
                     delay(500) // 模拟人类停顿，也方便观察 UI 变化
@@ -194,7 +208,8 @@ fun MainScreen(currentRule: SourceRule,onRuleChange: (SourceRule) -> Unit, onOpe
 
                     log.append("全链路测试成功！")
                 } catch (e: Exception) {
-                    resultBuffers[selectedTabIndex] = "ERROR: ${e.message}"
+                    e.printStackTrace()
+                    resultBuffers[selectedTabIndex] = "ERROR: ${e.localizedMessage}"
                 }
             }
         }
@@ -252,7 +267,7 @@ fun MainScreen(currentRule: SourceRule,onRuleChange: (SourceRule) -> Unit, onOpe
                         resultBuffers[currentTab] = ">>> 正在抓取 [${getTabName(currentTab)}] 源码，请稍候...\n"
 
                         // 如果当前是“目录页”且没有配置 URL 规则
-                        if (currentTab == 3 && currentRule.catalog.urlSelector.steps.isEmpty()) {
+                        if (currentTab == 4 && currentRule.catalog.urlSelector.steps.isEmpty()) {
                             // 自动从“详情页”的 Buffer 里取数据，而不是报错或重新抓取
                             val detailHtml = htmlBuffers[2] // 假设 1 是详情页
                             if (!detailHtml.isNullOrBlank()) {
@@ -427,52 +442,52 @@ fun runLocalTest(tabIndex: Int, input: String, rule: SourceRule, ctx: VariableCo
             }
 
             2 -> {
-                val list = rule.search.getList(html, rule.ctx)
+                val list = rule.search.getList(html, ctx)
                 log.appendLine("√ 找到 ${list.size} 本书")
 
                 list.take(3).forEach {
                     log.appendLine(
-                        " • 书名：${rule.search.getName(it, rule.ctx)}\n\t\t\t作者：${
+                        " • 书名：${rule.search.getName(it, ctx)}\n\t\t\t作者：${
                             rule.search.getAuthor(
                                 it,
-                                rule.ctx
+                                ctx
                             )
                         }\n\t\t\t封面：${
                             rule.search.getCover(
-                                it, rule.ctx
+                                it, ctx
                             )
-                        }\n\t\t\t详细地址：${rule.search.getDetailUrl(it, rule.ctx)}"
+                        }\n\t\t\t详细地址：${rule.search.getDetailUrl(it, ctx)}"
                     )
                 }
             }
 
             3 -> {
                 val detail = rule.detail
-                val name = detail.getBookName(html, rule.ctx)
+                val name = detail.getBookName(html, ctx)
                 ctx["bookName"] = name // 模拟存入上下文
 
                 log.appendLine("√ 书本详细")
                 log.appendLine(
-                    "书名：${name}\n作者：${detail.getBookAuthor(html, rule.ctx)}\n封面：${
+                    "书名：${name}\n作者：${detail.getBookAuthor(html, ctx)}\n封面：${
                         detail.getBookCover(
                             html,
-                            rule.ctx
+                            ctx
                         )
-                    }\n标签：${detail.getBookLabel(html, rule.ctx)}"
+                    }\n标签：${detail.getBookLabel(html, ctx)}"
                 )
-                log.appendLine("书本章节URL -> ${detail.getCatalogUrl(html, rule.ctx)}")
+                log.appendLine("书本章节URL -> ${detail.getCatalogUrl(html, ctx)}")
 
             }
 
             4 -> {
-                val chapters = rule.catalog.getChapters(html, rule.ctx)
+                val chapters = rule.catalog.getChapters(html, ctx)
                 log.appendLine("书本章节总数 -> ${chapters.size}")
                 chapters.forEachIndexed { i, chapter ->
                     log.appendLine(
-                        "${rule.catalog.getChapterName(chapter, rule.ctx)} >> ${
+                        "${rule.catalog.getChapterName(chapter, ctx)} >> ${
                             rule.catalog.getChapterUrl(
                                 chapter,
-                                rule.ctx
+                                ctx
                             )
                         }"
                     )
@@ -486,7 +501,7 @@ fun runLocalTest(tabIndex: Int, input: String, rule: SourceRule, ctx: VariableCo
                 val req = ImageRequest.Builder(context).data(text[0].toString())
                     .diskCachePolicy(CachePolicy.DISABLED)
                     .memoryCachePolicy(CachePolicy.DISABLED)
-                    .transformations(MangaDescrambleTransformation(text[0].toString(), rule))
+                    .transformations(MangaDescrambleTransformation(text[0].toString(), rule.id))
                     .httpHeaders(headers)
                     .listener(
                         onSuccess = { _, result ->

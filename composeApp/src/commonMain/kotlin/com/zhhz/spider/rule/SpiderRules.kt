@@ -145,12 +145,17 @@ data class ContentPage(
     override val urlSelector: Selector = Selector(),
     val contentSelector: Selector = Selector(),
     val nextUrlSelector: Selector = Selector(),
+    //图片头部
+    val imageHeaders: Selector = Selector(),
     val decryptImage: String = "",
     val regexReplaceSelector: Selector = Selector()
 ) : IPage {
+    fun getReaderUrl(text: String, ctx: VariableContext ) = RuleParser.parseString(text, urlSelector, ctx)
+
     fun getContent(text: String, ctx: VariableContext): List<Any> {
         return RuleParser.parseList(text, contentSelector, ctx)
     }
+
 }
 
 /**
@@ -175,7 +180,7 @@ data class SourceRule(
     val id: String = UUID.randomUUID().toString(),
     var name: String = "",
     var url: String = "",
-    var type: String = "",
+    var type: Int = 0,
     var concurrentRate: Long = 1000,
     var proxyUrl: String? = null,
     var customDns: String? = null, // 1. DNS服务器: "8.8.8.8,8.8.4.4" 以逗号分割
@@ -188,21 +193,34 @@ data class SourceRule(
     val detail: DetailPage = DetailPage(),
     val catalog: CatalogPage = CatalogPage(),
     val content: ContentPage = ContentPage()
-) {
-    @JSONField(serialize = false, deserialize = false)
-    val ctx: VariableContext = mutableMapOf()
-}
+)
 
 data class TagAction(val useCache: Boolean)
 
+// 💡 1. 纯净的 Kotlin 扩展函数，支持任意子集的闭环切换
+fun StepType.nextIn(allowedTypes: List<StepType>): StepType {
+    if (allowedTypes.isEmpty()) {
+        return StepType.entries[(this.ordinal + 1) % StepType.entries.size]
+    }
 
-fun SourceRule.toEntity(): RuleEntity {
+    // 2. 找到当前类型在子集中的索引
+    val currentIndex = allowedTypes.indexOf(this)
+
+    // 💡 3. 如果当前类型不在子集里（比如目前是 CSS，但点击后要进入子集）
+    // indexOf 会返回 -1，此时 (-1 + 1) % size = 0，会自动安全地跳转到子集的第一项！
+    val nextIndex = (currentIndex + 1) % allowedTypes.size
+
+    return allowedTypes[nextIndex]
+}
+
+fun SourceRule.toEntity(isEnabled: Boolean = true): RuleEntity {
     // 如果没有 ID，生成一个（这里建议在规则创建时分配）
     val finalId = this.id.ifBlank { Clock.System.now().toEpochMilliseconds().toString() }
     return RuleEntity(
         id = finalId,
         name = this.name,
-        jsonContent = JSON.toJSONString(this.copy())
+        jsonContent = JSON.toJSONString(this.copy()),
+        isEnabled = isEnabled,
     )
 }
 

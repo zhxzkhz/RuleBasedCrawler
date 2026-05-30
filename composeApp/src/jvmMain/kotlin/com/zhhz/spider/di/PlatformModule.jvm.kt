@@ -7,6 +7,9 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import coil3.PlatformContext
 import com.zhhz.spider.db.AppDatabase
+import com.zhhz.spider.util.BookPackager
+import okio.Path.Companion.toOkioPath
+import org.koin.core.module.dsl.singleOf
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import java.io.File
@@ -28,6 +31,20 @@ actual val platformModule = module {
             if (!exists()) mkdirs()
         }
     }
+
+    single(named("imageCacheDir")) {
+        File(System.getProperty("java.io.tmpdir"), "spider_image").apply {
+            if (!exists()) mkdirs()
+        }.toOkioPath()
+    }
+
+    single(named("bookCacheDir")) {
+        File(System.getProperty("java.io.tmpdir"), "spider_book").apply {
+            if (!exists()) mkdirs()
+        }.toOkioPath()
+    }
+
+    singleOf(::BookPackager)
 
     single<PlatformContext> { PlatformContext.INSTANCE }
 

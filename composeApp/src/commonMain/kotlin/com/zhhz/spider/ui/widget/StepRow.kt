@@ -19,13 +19,14 @@ import androidx.compose.ui.unit.sp
 import com.zhhz.spider.rule.ExtractType
 import com.zhhz.spider.rule.ParseStep
 import com.zhhz.spider.rule.StepType
+import com.zhhz.spider.rule.nextIn
 import com.zhhz.spider.ui.JsEditContext
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.close_24px
 
 @Composable
-fun StepRow(index: Int, step: ParseStep, onStepChange: (ParseStep) -> Unit, onDelete: () -> Unit, onOpenJsEditor: (JsEditContext) -> Unit) {
+fun StepRow(index: Int, step: ParseStep, onStepChange: (ParseStep) -> Unit, onDelete: () -> Unit, onOpenJsEditor: (JsEditContext) -> Unit,types: List<StepType> = emptyList()) {
 
     val stepColor = when (step.type) {
         StepType.CSS -> Color(0xFF1976D2)
@@ -51,7 +52,8 @@ fun StepRow(index: Int, step: ParseStep, onStepChange: (ParseStep) -> Unit, onDe
         // 2. 步骤类型切换 (CSS, XPATH等)
         Button(
             onClick = {
-                val nextType = StepType.entries[(step.type.ordinal + 1) % StepType.entries.size]
+                //val nextType = StepType.entries[(step.type.ordinal + 1) % StepType.entries.size]
+                val nextType = step.type.nextIn(types)
                 onStepChange(step.copy(type = nextType))
             },
             colors = ButtonDefaults.buttonColors(containerColor = stepColor),

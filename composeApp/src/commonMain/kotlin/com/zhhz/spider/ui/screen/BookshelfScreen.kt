@@ -1,5 +1,8 @@
 package com.zhhz.spider.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -11,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -18,65 +22,200 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhhz.spider.db.BookDao
-import com.zhhz.spider.db.BookEntity
+import com.zhhz.spider.ReaderRoute
+import com.zhhz.spider.model.DownloadStatus
+import com.zhhz.spider.model.DownloadTask
+import com.zhhz.spider.network.Book
 import com.zhhz.spider.ui.widget.BookCover
+import com.zhhz.spider.viewModel.BookshelfUiEffect
+import com.zhhz.spider.viewModel.BookshelfUiIntent
+import com.zhhz.spider.viewModel.BookshelfUiState
+import com.zhhz.spider.viewModel.BookshelfViewModel
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
-import org.koin.compose.koinInject
 import rulebasedcrawler.composeapp.generated.resources.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+
 @Composable
 fun BookshelfScreen(
-    onGoToSearch: () -> Unit,           // 导航：去搜索页
-    onOpenBook: (BookEntity) -> Unit,    // 导航：打开书（去详情或阅读页）
-    onDeleteBook: (BookEntity) -> Unit   // 动作：从书架移除
+    viewModel: BookshelfViewModel,
+    onGoToSearch: () -> Unit,
+    onNavigateToReader: (ReaderRoute) -> Unit,
+    onOpenRule: (Boolean) -> Unit
 ) {
-    val bookDao = koinInject<BookDao>()
-    val books by bookDao.getAllBooksFlow().collectAsState(initial = emptyList())
+    val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // 副作用监听 (Toast 和 跳页)
+    LaunchedEffect(Unit) {
+        viewModel.uiEffect.collect { effect ->
+            when (effect) {
+                is BookshelfUiEffect.ShowToast -> {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    launch { snackbarHostState.showSnackbar(effect.message) }
+                }
+                is BookshelfUiEffect.NavigateToReader -> {
+                    onNavigateToReader(ReaderRoute(
+                        bookUrl = effect.bookUrl,
+                        chapterIndex = effect.chapterIndex, // 传入 -1 让它自主查库
+                        chapterTitle = "", // 书架进入时，具体章节标题可以暂时为空
+                        ruleId = effect.ruleId
+                    ))
+                }
+            }
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = { Text("我的书架", fontWeight = FontWeight.ExtraBold) },
-                actions = {
-                    IconButton(onClick = onGoToSearch) {
-                        Icon(painterResource(Res.drawable.search_24px), contentDescription = "搜索新书")
-                    }
-                }
+            BookshelfTopBar(
+                uiState = uiState,
+                onToggleSelectionMode = { viewModel.processIntent(BookshelfUiIntent.ToggleSelectionMode) },
+                onSelectAll = {
+                    // 这里可以在 ViewModel 中加一个专门的意图，此处略写伪代码
+                    viewModel.processIntent(BookshelfUiIntent.SelectAll)
+                },
+                onRefresh = { viewModel.processIntent(BookshelfUiIntent.RefreshBooks) },
+                onGoToSearch = onGoToSearch,
+                onOpenRule = onOpenRule,
             )
         },
+        // 💡 多选模式下的底部操作栏
+        bottomBar = {
+            if (uiState.isSelectionMode && uiState.selectedBooks.isNotEmpty()) {
+                BottomAppBar(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant, // 💡 给个底色方便看清
+                    tonalElevation = 8.dp // 增加阴影，使其浮在内容上方
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        TextButton(
+                            onClick = { viewModel.processIntent(BookshelfUiIntent.DeleteSelectedBooks) }
+                        ) {
+                            Icon(painterResource(Res.drawable.download_24px), contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("删除选中 (${uiState.selectedBooks.size})", color = MaterialTheme.colorScheme.error)
+                        }
+
+                        // 后续如果要加下载功能：
+
+                        TextButton(onClick = {
+                            viewModel.processIntent(BookshelfUiIntent.DownloadSelectedBooks)
+                        }) {
+                            Icon(painterResource(Res.drawable.download_24px), contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("批量下载")
+                        }
+
+                        // 核心新增：批量导出为 ZIP 按钮！
+                        TextButton(
+                            onClick = { viewModel.processIntent(BookshelfUiIntent.ExportSelectedBooks) } // 👈 发送导出意图
+                        ) {
+                            Icon(painterResource(Res.drawable.share_24px), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("导出ZIP", color = MaterialTheme.colorScheme.primary)
+                        }
+
+                    }
+                }
+            }
+        },
         floatingActionButton = {
-            // 引导用户去搜索添加
-            FloatingActionButton(onClick = onGoToSearch, containerColor = MaterialTheme.colorScheme.primary) {
-                Icon(painterResource(Res.drawable.add_24px), "添加书籍")
+            if (!uiState.isSelectionMode) {
+                FloatingActionButton(onClick = onGoToSearch) {
+                    Icon(painterResource(Res.drawable.add_24px), "找书")
+                }
             }
         }
     ) { padding ->
-        if (books.isEmpty()) {
-            EmptyBookshelfPlaceholder()
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 105.dp), // 适配手机和电脑
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(padding).fillMaxSize()
-            ) {
-                items(books) { book ->
-                    BookItemCard(
-                        book = book,
-                        onClick = { onOpenBook(book) },
-                        onDelete = { onDeleteBook(book) }
-                    )
+        // 💡 书架内容区域
+        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+            if (uiState.isLoading) {
+                CircularProgressIndicator(Modifier.align(Alignment.Center))
+            } else if (uiState.books.isEmpty()) {
+                EmptyBookshelfPlaceholder() // 原有的空书架提示
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 105.dp),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(uiState.books) { book ->
+                        BookItemCard(
+                            book = book,
+                            // 💡 极速取出这本书当前的后台下载任务
+                            downloadTask = uiState.downloadTasks[book.url],
+                            isSelectionMode = uiState.isSelectionMode,
+                            isSelected = uiState.selectedBooks.contains(book.url),
+                            onClick = {
+                                viewModel.processIntent(BookshelfUiIntent.BookClicked(book))
+                            },
+                            onLongClick = {
+                                // 💡 长按进入管理模式，并立刻选中当前书本
+                                if (!uiState.isSelectionMode) {
+                                    viewModel.processIntent(BookshelfUiIntent.ToggleSelectionMode)
+                                    viewModel.processIntent(BookshelfUiIntent.ToggleSelectBook(book.url))
+                                }
+                            },
+                            onToggleDownload = {
+                                val task = uiState.downloadTasks[book.url]
+                                if (task == null || task.status == DownloadStatus.PAUSED || task.status == DownloadStatus.ERROR) {
+                                    viewModel.processIntent(BookshelfUiIntent.StartDownload(book.url, book.ruleId, book.title))
+                                } else if (task.status == DownloadStatus.DOWNLOADING) {
+                                    viewModel.processIntent(BookshelfUiIntent.PauseDownload(book.url))
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BookItemCard(book: BookEntity, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun BookshelfTopBar(
+    uiState: BookshelfUiState,
+    onToggleSelectionMode: () -> Unit,
+    onSelectAll: () -> Unit, // 全选/取消全选
+    onRefresh: () -> Unit,
+    onGoToSearch: () -> Unit,
+    onOpenRule: (Boolean) -> Unit
+) {
+    if (uiState.isSelectionMode) {
+        // 💡 模式 B：多选管理模式
+        TopAppBar(
+            title = { Text("已选择 ${uiState.selectedBooks.size} 本书") },
+            navigationIcon = {
+                IconButton(onClick = onToggleSelectionMode) { Icon(painterResource(Res.drawable.close_24px), "退出管理") }
+            },
+            actions = {
+                val isAllSelected = uiState.selectedBooks.size == uiState.books.size && uiState.books.isNotEmpty()
+                TextButton(onClick = onSelectAll) { Text(if (isAllSelected) "取消全选" else "全选") }
+            }
+        )
+    } else {
+        // 💡 模式 A：正常浏览模式
+        TopAppBar(
+            title = { Text("我的书架", fontWeight = FontWeight.ExtraBold) },
+            actions = {
+                IconButton(onClick = {
+                    onOpenRule(true)
+                }) { Icon(painterResource(Res.drawable.code_blocks_24px), "编辑规则") }
+                IconButton(onClick = onRefresh) { Icon(painterResource(Res.drawable.refresh_24px), "检测更新") }
+                IconButton(onClick = onGoToSearch) { Icon(painterResource(Res.drawable.search_24px), "搜索新书") }
+            }
+        )
+    }
+}
+
+@Composable
+fun BookItemCard(book: Book, onClick: () -> Unit, onDelete: () -> Unit) {
     var showMenu by remember { mutableStateOf(false) }
 
     Column(
@@ -133,42 +272,84 @@ fun BookItemCard(book: BookEntity, onClick: () -> Unit, onDelete: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun BookItem(book: BookEntity, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column(
+private fun BookItemCard(
+    book: Book,
+    downloadTask: DownloadTask?, // 💡 注入这本书对应的下载任务
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onToggleDownload: () -> Unit // 开始/暂停下载
+) {
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .clip(RoundedCornerShape(8.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick // 长按触发管理
+            )
     ) {
-        // 封面图卡片
-        Card(
-            shape = RoundedCornerShape(4.dp),
-            elevation = CardDefaults.cardElevation(4.dp),
-            modifier = Modifier.aspectRatio(0.75f) // 经典书刊比例
-        ) {
-            // 注意：此处需要集成 KMP 图片加载库如 Coil3 或 Kamel
-            // 暂时使用占位 Box
-            BookCover(book.cover)
+        Column {
+            Box {
+                // 1. 书籍封面
+                BookCover(url = book.cover, modifier = Modifier.fillMaxWidth().aspectRatio(0.7f))
+
+                // 2. 💡 离线下载蒙层与进度条
+                if (downloadTask != null) {
+                    Box(
+                        modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.5f))
+                    ) {
+                        // 居中显示下载状态按钮 (下载中 / 已暂停 / 出错)
+                        IconButton(
+                            onClick = onToggleDownload,
+                            modifier = Modifier.align(Alignment.Center)
+                        ) {
+                            val icon = when (downloadTask.status) {
+                                DownloadStatus.DOWNLOADING -> painterResource(Res.drawable.pause_24px) // 正在下，点它就是暂停
+                                DownloadStatus.PAUSED, DownloadStatus.ERROR -> painterResource(Res.drawable.play_arrow_24px) // 暂停了，点它就是继续
+                                DownloadStatus.COMPLETED -> painterResource(Res.drawable.check_24px)
+                                else -> painterResource(Res.drawable.cloud_download_24px)
+                            }
+                            Icon(icon, contentDescription = null, tint = Color.White)
+                        }
+
+                        // 底部显示进度条
+                        if (downloadTask.status == DownloadStatus.DOWNLOADING || downloadTask.status == DownloadStatus.PAUSED) {
+                            LinearProgressIndicator(
+                                progress = { downloadTask.progress },
+                                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(4.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        }
+                    }
+                }
+
+                // 3. 多选模式下的勾选框
+                if (isSelectionMode) {
+                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.3f)))
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = null, // 点击事件由外层的 Card 统一处理
+                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                    )
+                }
+            }
+
+            // 4. 书名与阅读进度
+            Text(
+                text = book.title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            // (可选) 显示有没有未读新章节小红点
         }
-
-        Spacer(Modifier.height(8.dp))
-
-        // 书名
-        Text(
-            text = book.title,
-            maxLines = 2,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        // 最后阅读/更新进度
-        Text(
-            text = book.lastReadChapterTitle,
-            fontSize = 11.sp,
-            color = Color.Gray,
-            maxLines = 1
-        )
     }
 }
 

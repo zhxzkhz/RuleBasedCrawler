@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [BookEntity::class,ChapterEntity::class,RuleEntity::class, SessionEntity::class], // 必须在这里添加新类
-    version = 5,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

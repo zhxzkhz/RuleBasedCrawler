@@ -1,34 +1,32 @@
 package com.zhhz.spider.manager
 
-import com.zhhz.spider.db.ChapterDao
-import com.zhhz.spider.db.toDomain
+import com.zhhz.spider.network.Book
 import com.zhhz.spider.network.Chapter
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import com.zhhz.spider.network.SearchBook
 
-/**
- * 会话管理器：跨页面传递大批量数据（如目录）
- */
+// 纯粹的内存数据持有者
 class BookSessionManager {
-    // 内存中的临时目录缓存
-    private var transientCatalog: List<Chapter> = emptyList()
+    private var _currentSearchBook: Book? = null
 
-    fun setTransientCatalog(list: List<Chapter>) {
-        transientCatalog = list
+    private var _currentCatalog: List<Chapter> = emptyList()
+
+    fun setCurrentBook(book: Book) {
+        _currentSearchBook = book
     }
 
-    fun getCatalog(bookUrl: String, dao: ChapterDao): Flow<List<Chapter>> = flow {
-        // 1. 优先从内存里拿（刚从详情页点进来）
-        if (transientCatalog.isNotEmpty()) {
-            emit(transientCatalog)
-            return@flow
-        }
+    fun getCurrentBook(): Book? {
+        return _currentSearchBook
+    }
 
-        // 2. 内存没有，再从数据库里拿（已经收藏的书，下次重新打开）
-        // 这里假设你有一张 chapter_cache 表，或者从数据库恢复
-        val saved = dao.getChapters(bookUrl).map {
-            it.toDomain()
-        }
-        emit(saved)
+    fun setCatalog(currentCatalog: List<Chapter>) {
+        _currentCatalog = currentCatalog
+    }
+
+    fun getCatalog(): List<Chapter> {
+        return _currentCatalog
+    }
+
+    fun clear() {
+        _currentSearchBook = null
     }
 }

@@ -8,5 +8,6 @@ data class RuleEntity(
     @PrimaryKey val id: String,
     val name: String,
     val jsonContent: String,
+    val isEnabled: Boolean,
     val updateTime: Long = System.currentTimeMillis()
 )
