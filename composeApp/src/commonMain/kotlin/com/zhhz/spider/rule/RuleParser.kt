@@ -7,10 +7,8 @@ import com.zhhz.spider.util.JsExtensionClass
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
-import org.mozilla.javascript.Context
-import org.mozilla.javascript.ContextFactory
-import org.mozilla.javascript.RhinoException
 import java.util.regex.Pattern
+import java.util.concurrent.ConcurrentHashMap
 import javax.script.ScriptEngine
 import javax.script.ScriptException
 import javax.script.SimpleBindings
@@ -21,10 +19,20 @@ val SCRIPT_ENGINE: ScriptEngine = ENGINE
 
 object RuleParser {
 
+    private val regexPatternCache = ConcurrentHashMap<String, Pattern>()
+    private val replaceRegexCache = ConcurrentHashMap<String, Regex>()
+
     /** 预期返回字符串 */
     fun parseString(input: Any?, selector: Selector, ctx: VariableContext): String {
         val res = parseInternal(input, selector, ctx)
         return if (res is List<*>) res.firstOrNull()?.toString() ?: "" else res.toString()
+    }
+
+    fun traceString(input: Any?, selector: Selector, ctx: VariableContext, selectorName: String): ParseTraceResult<String> {
+        val events = mutableListOf<ParseTraceEvent>()
+        val res = parseInternal(input, selector, ctx, selectorName, events)
+        val value = if (res is List<*>) res.firstOrNull()?.toString() ?: "" else res.toString()
+        return ParseTraceResult(value, events)
     }
 
     /** 预期返回列表 */
@@ -36,7 +44,23 @@ object RuleParser {
         }
     }
 
-    fun parseInternal(input: Any?, selector: Selector, ctx: VariableContext): Any {
+    fun traceList(input: Any?, selector: Selector, ctx: VariableContext, selectorName: String): ParseTraceResult<List<Any>> {
+        val events = mutableListOf<ParseTraceEvent>()
+        val res = parseInternal(input, selector, ctx, selectorName, events)
+        val value = when (res) {
+            is List<*> -> res.filterNotNull()
+            else -> if (res.toString().isBlank()) emptyList() else listOf(res)
+        }
+        return ParseTraceResult(value, events)
+    }
+
+    fun parseInternal(
+        input: Any?,
+        selector: Selector,
+        ctx: VariableContext,
+        selectorName: String = "selector",
+        traceEvents: MutableList<ParseTraceEvent>? = null
+    ): Any {
 
         // 关键：在循环开始前锁定“根数据”
         val rootData: Any = input ?: ""
@@ -48,9 +72,55 @@ object RuleParser {
         for ((index, step) in selector.steps.withIndex()) {
             if (dataList.isEmpty()) {
                 logger.warn { "步骤 [${index + 1}] (${step.type}) 执行前列表已干涸，中断解析" }
+                traceEvents?.add(
+                    ParseTraceEvent(
+                        selectorName = selectorName,
+                        stepIndex = index + 1,
+                        stepCount = selector.steps.size,
+                        type = step.type,
+                        rule = step.rule,
+                        inputCount = 0,
+                        outputCount = 0,
+                        status = ParseTraceStatus.SKIPPED,
+                        message = "上一步已无输出"
+                    )
+                )
                 break
             }
-            dataList = processBatch(dataList,  rootData,step, ctx)
+            val inputCount = dataList.size
+            dataList = try {
+                processBatch(dataList, rootData, step, ctx)
+            } catch (e: Exception) {
+                traceEvents?.add(
+                    ParseTraceEvent(
+                        selectorName = selectorName,
+                        stepIndex = index + 1,
+                        stepCount = selector.steps.size,
+                        type = step.type,
+                        rule = step.rule,
+                        inputCount = inputCount,
+                        outputCount = 0,
+                        status = ParseTraceStatus.ERROR,
+                        message = e.message ?: e::class.simpleName ?: "未知错误"
+                    )
+                )
+                logger.error(e) {
+                    "规则解析步骤失败 step=${index + 1}/${selector.steps.size} type=${step.type} rule=${step.rule.truncate(120)} input=${rootData.toString().truncate(160)}"
+                }
+                throw e
+            }
+            traceEvents?.add(
+                ParseTraceEvent(
+                    selectorName = selectorName,
+                    stepIndex = index + 1,
+                    stepCount = selector.steps.size,
+                    type = step.type,
+                    rule = step.rule,
+                    inputCount = inputCount,
+                    outputCount = dataList.size,
+                    status = if (dataList.isEmpty()) ParseTraceStatus.EMPTY else ParseTraceStatus.OK
+                )
+            )
             logger.debug { "步骤 [${index + 1}] (${step.type}) 执行完毕，执行代码：${step.rule.truncate(40)}，产出数量: ${dataList.size}" }
         }
 
@@ -58,7 +128,7 @@ object RuleParser {
 
         if (isEmpty(finalResult) && selector.fallback != null) {
             logger.info { "主规则解析无结果，触发备选规则 (Fallback)" }
-            return parseInternal(input, selector.fallback, ctx)
+            return parseInternal(input, selector.fallback, ctx, "$selectorName.fallback", traceEvents)
         }
 
         val result = finalResult ?: selector.defaultValue
@@ -69,7 +139,14 @@ object RuleParser {
     private fun processBatch(inputs: List<Any>, root: Any, step: ParseStep, ctx: VariableContext): List<Any> {
         val output = mutableListOf<Any>()
         for (item in inputs) {
-            val res = processSingle(item, root, step, ctx)
+            val res = try {
+                processSingle(item, root, step, ctx)
+            } catch (e: Exception) {
+                logger.error(e) {
+                    "规则解析单项失败 type=${step.type} rule=${step.rule.truncate(120)} item=${item.toString().truncate(160)}"
+                }
+                throw e
+            }
             if (res is List<*>) res.filterNotNull().forEach { output.add(it) }
             else if (res != null && res != "") output.add(res)
         }
@@ -94,7 +171,7 @@ object RuleParser {
 
             // 3. 文本正则：利用 Sequence 优化列表处理
             StepType.REGEX -> {
-                val matcher = Pattern.compile(step.rule).matcher(asString)
+                val matcher = regexPatternCache.computeIfAbsent(step.rule) { Pattern.compile(it) }.matcher(asString)
                 val results = generateSequence { if (matcher.find()) matcher.group(if (matcher.groupCount() > 0) 1 else 0) else null }.toList()
                 if (step.isList) results else results.firstOrNull()
             }
@@ -102,7 +179,8 @@ object RuleParser {
             // 4. 文本变换
             StepType.REPLACE -> {
                 val target = resolveTemplate(step.rule, "", ctx)
-                asString.replace(Regex(target), step.replacement.decodeEscapes())
+                val regex = replaceRegexCache.computeIfAbsent(target) { Regex(it) }
+                asString.replace(regex, step.replacement.decodeEscapes())
             }
 
             // 5. 数据解析
@@ -126,7 +204,7 @@ object RuleParser {
                 bindings["data"] = item
                 bindings["root"] = root  // 【新增】根数据，JS 里可以用 root.xxx 访问原始 HTML
                 try {
-                    JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(step.rule, bindings))
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(step.rule, bindings))
                 }  catch (e: ScriptException){
                     val errorDetail = """
                     JS执行失败！
@@ -146,7 +224,7 @@ object RuleParser {
             StepType.TEMPLATE -> {
                 // 3. 再次通过 resolveTemplate 处理上下文中的 {{variable}}
                 // 自动解析并填充：{{css:.class}}, {{xpath://a}}, {{$.json.path}}
-                // 【核心优化】：支持 {{rootcss:...}} 或 {{root$.xxx}} 语法
+                // 同时兼容旧的 {{rootcss:...}} 和新的 {{root.css:...}} 语法
                 val dynamicTemplate = parseInternalQueries(step.rule, item, root)
                 resolveTemplate(dynamicTemplate, item.toString(), ctx)
             }
@@ -182,11 +260,11 @@ object RuleParser {
     }
 
     private fun parseInternalQueries(template: String, item: Any, root: Any): String {
-        // 增强正则：支持 (root)?(协议)
+        // 增强正则：支持 root.css:/root.xpath:/root.json:，并兼容历史 rootcss:/root$. 写法。
         // 组1: 是否有 root 标记
         // 组2: 协议 (css:|xpath:|$.|key)
         // 组3: 表达式
-        val placeholderRegex = Regex("""\{\{\s*(root)?(css:|xpath:|\$\.|key)(.*?)\s*\}\}""")
+        val placeholderRegex = Regex("""\{\{\s*(?:(root)\.?)?(css:|xpath:|json:|\$\.|key)(.*?)\s*\}\}""")
 
         return placeholderRegex.replace(template) { match ->
             val useRoot = match.groupValues[1] == "root"
@@ -203,10 +281,16 @@ object RuleParser {
                 else -> StepType.JSON
             }
 
+            val rule = when {
+                protocol == "$." -> "$protocol$expression"
+                protocol == "json:" && expression.startsWith("$") -> expression
+                else -> expression
+            }
+
             evaluateQuery(
                 item = targetSource,
                 type = type,
-                rule = if (protocol == "$.") "$protocol$expression" else expression
+                rule = rule
             )
         }
     }
@@ -229,9 +313,15 @@ object RuleParser {
     private fun isEmpty(data: Any?): Boolean = data == null || data == "" || (data is List<*> && data.isEmpty())
 
     fun resolveTemplate(template: String, input: String, ctx: VariableContext): String {
-        var res = template.replace("{{key}}", input)
-        ctx.forEach { (k, v) -> res = res.replace("{{$k}}", v) }
-        return res
+        val placeholderRegex = Regex("""\{\{\s*([A-Za-z_][\w.-]*|key)\s*\}\}""")
+        return placeholderRegex.replace(template) { match ->
+            val key = match.groupValues[1]
+            when {
+                key == "key" -> input
+                key.startsWith("ctx.") -> ctx[key.removePrefix("ctx.")] ?: match.value
+                else -> ctx[key] ?: match.value
+            }
+        }
     }
 
     fun String.decodeEscapes(): String {

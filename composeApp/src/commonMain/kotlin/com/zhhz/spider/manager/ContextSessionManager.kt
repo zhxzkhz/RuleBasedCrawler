@@ -15,16 +15,16 @@ class ContextSessionManager(private val maxEntries: Int = 50) {
      * 获取或创建会话（返回的是内存实例引用，保证后续网络操作的 Cookie 实时同步）
      */
     suspend fun getContext(key: String,ruleId: String? = null): VariableContext = lock.withLock {
-        var existingCtx = sessions[key]
-        if (existingCtx == null && ruleId != null) {
-            existingCtx = sessions[ruleId]
-        }
+        val existingCtx = sessions[key]
         if (existingCtx != null) {
             keyOrder.remove(key)
             keyOrder.add(key)
             existingCtx
         } else {
-            val newCtx: VariableContext = mutableMapOf()
+            val newCtx: VariableContext = ruleId
+                ?.let { sessions[it] }
+                ?.toMutableMap()
+                ?: mutableMapOf()
             sessions[key] = newCtx
             keyOrder.add(key)
             pruneCacheIfNeeded()
@@ -40,7 +40,7 @@ class ContextSessionManager(private val maxEntries: Int = 50) {
     suspend fun forkContext(fromKey: String, bookUrl: String) = lock.withLock {
         // 💡 幂等保护：如果目标书本的会话已经在缓存里了（说明之前在详情页已经派生过）
         // 直接拦截，拒绝重复克隆，完美保护现有的阅读会话状态！
-        if (sessions.containsKey(bookUrl)) return
+        if (sessions.containsKey(bookUrl)) return@withLock
         val sourceCtx = sessions[fromKey]
         if (sourceCtx != null) {
             // 💡 执行深拷贝，生成全新的 Map 实例
@@ -53,6 +53,7 @@ class ContextSessionManager(private val maxEntries: Int = 50) {
         }
     }
 
+    @Suppress("unused")
     suspend fun clear(key: String) = lock.withLock {
         sessions.remove(key)
         keyOrder.remove(key)

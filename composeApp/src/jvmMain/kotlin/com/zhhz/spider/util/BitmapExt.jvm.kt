@@ -2,7 +2,7 @@ package com.zhhz.spider.util
 
 import org.jetbrains.skia.Image
 import coil3.Bitmap
-import com.zhhz.spider.rule.SCRIPT_ENGINE
+import com.zhhz.spider.rule.JsEngineRunner
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jetbrains.skia.EncodedImageFormat
 import javax.script.ScriptException
@@ -30,7 +30,7 @@ actual fun Bitmap.descrambleAndEncode(
         if (decryptRule.isNotBlank()) {
             try {
                 output =
-                    JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(decryptRule, bindings)) as Bitmap
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(decryptRule, bindings)) as Bitmap
             } catch (e: ScriptException) {
                 val errorDetail = """
                 JS执行失败！

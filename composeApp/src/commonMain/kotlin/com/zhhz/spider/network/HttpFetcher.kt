@@ -60,11 +60,16 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
 
         return try {
             client.newCall(okReq).execute().use { resp ->
-                if (!resp.isSuccessful) return "ERROR: HTTP ${resp.code} >> ${resp.body.string()}"
+                if (!resp.isSuccessful) {
+                    val errorBody = resp.body.string()
+                    logger.error { "HTTP 请求失败 sourceId=$sourceId method=${req.method} url=${req.url} code=${resp.code} body=${errorBody.take(500)}" }
+                    return "ERROR: HTTP ${resp.code} >> $errorBody"
+                }
                 val bytes = resp.body.bytes()
                 String(bytes, Charset.forName(req.charset))
             }
         } catch (e: Exception) {
+            logger.error(e) { "HTTP 请求异常 sourceId=$sourceId method=${req.method} url=${req.url}" }
             "ERROR: ${e.message}"
         }
     }

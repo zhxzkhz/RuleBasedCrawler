@@ -3,14 +3,13 @@ package com.zhhz.spider.repository.impl
 import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.toDomain
 import com.zhhz.spider.manager.ContextSessionManager
+import com.zhhz.spider.model.CrawlerStage
 import com.zhhz.spider.network.Book
 import com.zhhz.spider.network.BookDetail
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.network.toEntity
 import com.zhhz.spider.repository.DetailRepository
 import com.zhhz.spider.repository.RuleRepository
-import com.zhhz.spider.repository.SessionRepository
-import com.zhhz.spider.rule.VariableContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -29,11 +28,13 @@ class DetailRepositoryImpl(
         ruleId: String
     ): BookDetail {
         val rule = ruleRepository.getEnabledRules().find { it.id == ruleId }
+            ?: throw Exception("找不到对应的书源规则")
         return withContext(Dispatchers.IO) {
-            val ctx = contextSessionManager.getContext(detailUrl)
+            val ctx = contextSessionManager.getContext(detailUrl, ruleId)
             ctx["bookUrl"] = detailUrl
             // 1. 抓取详情页 HTML
-            val bookDetailHtml = fetchTaskRunner.fetch(rule!!, rule.detail, detailUrl, ctx)
+            val bookDetailHtml = fetchTaskRunner.fetch(rule, rule.detail, detailUrl, ctx)
+            bookDetailHtml.throwIfCrawlerError(rule, CrawlerStage.DETAIL)
             ctx["bookDetailHtml"] = bookDetailHtml
             // 2. 解析基本信息
             val title = rule.detail.getBookName(bookDetailHtml, ctx)

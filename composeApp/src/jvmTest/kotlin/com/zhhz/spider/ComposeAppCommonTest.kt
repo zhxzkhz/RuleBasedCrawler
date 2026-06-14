@@ -18,7 +18,7 @@ class ComposeAppCommonTest {
         val bindings = SimpleBindings()
         bindings["ooo"] = ArrayList<String>()
         bindings["logger"] = logger
-        val a = com.zhhz.spider.rule.SCRIPT_ENGINE.eval("logger.info(function() { return ooo.class == \"class java.util.ArrayList\" })", bindings)
+        val a = com.zhhz.spider.rule.JsEngineRunner.eval("logger.info(function() { return ooo.class == \"class java.util.ArrayList\" })", bindings)
         println(a)
     }
 

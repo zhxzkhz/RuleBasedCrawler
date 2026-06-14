@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.JSONReader
 import com.alibaba.fastjson2.annotation.JSONField
 import com.alibaba.fastjson2.annotation.JSONType
+import com.zhhz.spider.constant.BookType
 import com.zhhz.spider.db.RuleEntity
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -192,7 +193,7 @@ data class SourceRule(
     val id: String = UUID.randomUUID().toString(),
     var name: String = "",
     var url: String = "",
-    var type: Int = 0,
+    var type: Int = BookType.text,
     var concurrentRate: Long = 1000,
     var proxyUrl: String? = null,
     var customDns: String? = null, // 1. DNS服务器: "8.8.8.8,8.8.4.4" 以逗号分割

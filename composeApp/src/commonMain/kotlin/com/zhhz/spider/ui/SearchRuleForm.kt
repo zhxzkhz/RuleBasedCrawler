@@ -20,6 +20,7 @@ import com.zhhz.spider.ui.widget.SelectorEditor
 @Composable
 fun SearchRuleForm(
     searchRule: SearchPage?,
+    highlightedSelectorName: String? = null,
     onOpenJsEditor: (JsEditContext) -> Unit,
     onUpdate: (SearchPage) -> Unit
 ) {
@@ -34,23 +35,23 @@ fun SearchRuleForm(
 
         Text("内容解析逻辑", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
 
-        SelectorEditor("搜索地址 (必填)", searchRule.urlSelector,onOpenJsEditor = onOpenJsEditor) {
+        SelectorEditor("搜索地址 (必填)", searchRule.urlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "SearchPage.urlSelector"), onOpenJsEditor = onOpenJsEditor) {
             onUpdate(searchRule.copy(urlSelector = it))
         }
 
-        SelectorEditor("列表容器 (List)", searchRule.listSelector,onOpenJsEditor = onOpenJsEditor) {
+        SelectorEditor("列表容器 (List)", searchRule.listSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "SearchPage.listSelector"), onOpenJsEditor = onOpenJsEditor) {
             onUpdate(searchRule.copy(listSelector = it))
         }
-        SelectorEditor("书名 (Name)", searchRule.nameSelector,onOpenJsEditor = onOpenJsEditor) {
+        SelectorEditor("书名 (Name)", searchRule.nameSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "SearchPage.nameSelector"), onOpenJsEditor = onOpenJsEditor) {
             onUpdate(searchRule.copy(nameSelector = it))
         }
-        SelectorEditor("作者 (Author)", searchRule.authorSelector,onOpenJsEditor = onOpenJsEditor) {
+        SelectorEditor("作者 (Author)", searchRule.authorSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "SearchPage.authorSelector"), onOpenJsEditor = onOpenJsEditor) {
             onUpdate(searchRule.copy(authorSelector = it))
         }
-        SelectorEditor("封面 (Cover)", searchRule.coverSelector,onOpenJsEditor = onOpenJsEditor) {
+        SelectorEditor("封面 (Cover)", searchRule.coverSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "SearchPage.coverSelector"), onOpenJsEditor = onOpenJsEditor) {
             onUpdate(searchRule.copy(coverSelector = it))
         }
-        SelectorEditor("详情链接 (DetailUrl)", searchRule.detailUrlSelector,onOpenJsEditor = onOpenJsEditor) {
+        SelectorEditor("详情链接 (DetailUrl)", searchRule.detailUrlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "SearchPage.detailUrlSelector"), onOpenJsEditor = onOpenJsEditor) {
             onUpdate(searchRule.copy(detailUrlSelector = it))
         }
 

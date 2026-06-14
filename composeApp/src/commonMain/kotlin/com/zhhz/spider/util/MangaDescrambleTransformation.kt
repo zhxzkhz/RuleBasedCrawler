@@ -7,7 +7,7 @@ import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.manager.getActiveContext
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.SessionRepository
-import com.zhhz.spider.rule.SCRIPT_ENGINE
+import com.zhhz.spider.rule.JsEngineRunner
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -45,7 +45,7 @@ class MangaDescrambleTransformation(
         if (rule.content.decryptImage.isNotBlank()) {
             try {
                 output =
-                    JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(rule.content.decryptImage, bindings)) as Bitmap
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(rule.content.decryptImage, bindings)) as Bitmap
             } catch (e: ScriptException) {
                 val errorDetail = """
                 JS执行失败！

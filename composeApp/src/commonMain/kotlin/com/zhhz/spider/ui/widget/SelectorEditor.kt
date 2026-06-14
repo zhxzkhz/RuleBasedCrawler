@@ -1,13 +1,18 @@
 package com.zhhz.spider.ui.widget
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -22,6 +27,7 @@ import com.zhhz.spider.rule.ParseStep
 import com.zhhz.spider.rule.Selector
 import com.zhhz.spider.rule.StepType
 import com.zhhz.spider.ui.JsEditContext
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.list_24px
@@ -174,27 +180,44 @@ fun SelectorEditor(
     title: String,
     selector: Selector,
     level: Int = 0, // 用于递归缩进
+    highlighted: Boolean = false,
     onOpenJsEditor: (JsEditContext) -> Unit,
     onSelectorChange: (Selector) -> Unit
 ) {
-    SelectorEditor(title, selector, level, emptyList(), onOpenJsEditor, onSelectorChange)
+    SelectorEditor(title, selector, level, emptyList(), highlighted, onOpenJsEditor, onSelectorChange)
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun SelectorEditor(
     title: String,
     selector: Selector,
     level: Int = 0, // 用于递归缩进
     typeList: List<StepType>,
+    highlighted: Boolean = false,
     onOpenJsEditor: (JsEditContext) -> Unit,
     onSelectorChange: (Selector) -> Unit
 ) {
+    val highlightColor = Color(0xFFFFC107)
+    val borderColor = if (highlighted && level == 0) highlightColor else Color(0xFFE0E0E0)
+    val backgroundColor = if (highlighted && level == 0) Color(0xFFFFF8E1) else Color.White
+    val shouldBringIntoView = highlighted && level == 0
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+
+    LaunchedEffect(shouldBringIntoView) {
+        if (shouldBringIntoView) {
+            delay(80)
+            bringIntoViewRequester.bringIntoView()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .bringIntoViewRequester(bringIntoViewRequester)
             .padding(start = (level * 12).dp) // 递归时的缩进
-            .background(Color.White, RoundedCornerShape(8.dp))
-            .border(1.dp, Color(0xFFE0E0E0), RoundedCornerShape(8.dp))
+            .background(backgroundColor, RoundedCornerShape(8.dp))
+            .border(if (highlighted && level == 0) 2.dp else 1.dp, borderColor, RoundedCornerShape(8.dp))
     ) {
         // --- 1. 标题栏 (仅在顶层显示) ---
         if (level == 0) {
@@ -202,7 +225,24 @@ fun SelectorEditor(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
+                Text(
+                    title,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF333333),
+                    modifier = Modifier.weight(1f)
+                )
+                if (highlighted) {
+                    Text(
+                        "Trace 定位",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF8A5A00),
+                        modifier = Modifier
+                            .background(Color(0xFFFFECB3), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
             HorizontalDivider(color = Color(0xFFF0F0F0))
         }
@@ -310,6 +350,7 @@ fun SelectorEditor(
                     title = "备选",
                     selector = fb,
                     level = level + 1,
+                    highlighted = false,
                     onSelectorChange = { onSelectorChange(selector.copy(fallback = it)) },
                     onOpenJsEditor = onOpenJsEditor
                 )

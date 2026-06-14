@@ -5,7 +5,7 @@ import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.manager.getActiveContext
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.SessionRepository
-import com.zhhz.spider.rule.SCRIPT_ENGINE
+import com.zhhz.spider.rule.JsEngineRunner
 import com.zhhz.spider.util.JsExtensionClass
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +53,7 @@ class MangaCallFactory(
             // 如果有动态脚本(Js)，执行它以生成最新的 Header
             if (!it.globalConfig.headerScript.isNullOrBlank()) {
                 val dynamicHeaders =
-                    JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(it.globalConfig.headerScript!!, bindings))
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(it.globalConfig.headerScript!!, bindings))
                 if (dynamicHeaders is String) {
                     try {
                         JSON.parseObject(dynamicHeaders, Map::class.java).map { (key, value) ->

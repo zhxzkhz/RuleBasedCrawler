@@ -6,6 +6,7 @@ import com.zhhz.spider.db.SessionEntity
 import com.zhhz.spider.rule.*
 import com.zhhz.spider.util.JsExtensionClass
 import io.github.oshai.kotlinlogging.KotlinLogging
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.InetSocketAddress
 import java.net.Proxy
 import javax.script.SimpleBindings
@@ -62,20 +63,21 @@ class FetchTaskRunner(
             if (!ctx.containsKey("token")) {
                 // 3. 内存没有，去数据库捞
                 val savedSession = dao.getSession(source.id)
+                val isSavedSessionExpired = savedSession != null &&
+                        savedSession.expireAt > 0 &&
+                        System.currentTimeMillis() > savedSession.expireAt
 
-                if (savedSession != null) {
+                if (savedSession != null && !isSavedSessionExpired) {
                     ctx["token"] = savedSession.tokenValue
                 } else {
                     // 4. 数据库也没有，说明从未登录或已被清除
                     // 这里可以报错提示用户，或者自动尝试执行一次 performLogin
-                    logger.info { "凭证缺失或过期，尝试重新登录..." }
+                    logger.info { "凭证缺失或过期，尝试重新登录 source=${source.name.ifBlank { source.id }} id=${source.id}" }
                     val newToken = performLogin(source, ctx) // 这里的逻辑见前一条回复
                     if (newToken.first.isBlank()){
+                        logger.error { "登录失败，未获取到 token source=${source.name.ifBlank { source.id }} id=${source.id}" }
                         return "ERROR: REQUIRE_LOGIN"
                     }
-                    // 存入数据库持久化
-                    dao.saveSession(SessionEntity(source.id, newToken.first, expireAt = -1))
-                    // return "ERROR: REQUIRE_LOGIN"
                 }
             }
         }
@@ -99,12 +101,8 @@ class FetchTaskRunner(
             input
         }
 
-        // 绝对化处理 (确保以 http 开头)
-        val rawUrl = when {
-            path.startsWith("http") -> path
-            source.url.isBlank() -> path // 兜底：无 base 时原样返回
-            else -> combineUrl(source.url, path)
-        }
+        // 绝对化处理：支持 /path、../path、?query、//cdn.example.com 这类常见相对地址
+        val rawUrl = combineUrl(source.url, path)
 
         // 3. 执行模板渲染 (把 {{key}} 或 {{variable}} 替换掉)
         // 注意：如果 rawUrl == input，且 input 里没括号，resolveTemplate 会原样返回，安全！
@@ -128,10 +126,10 @@ class FetchTaskRunner(
         val script = local.headerScript ?: global.headerScript
         if (!script.isNullOrBlank()) {
 
-            var jsonResult: Any
+            var jsonResult: Any?
             try {
                 // 执行 JS，约定脚本返回一个 JSON 字符串，例如: '{"Token": "abc", "Time": "123"}'
-                jsonResult = SCRIPT_ENGINE.eval(script, bindings)
+                jsonResult = JsEngineRunner.eval(script, bindings)
                 logger.debug { "JSON RESULT: $jsonResult" }
                 // 解析并合并到请求头中
                 val dynamicHeaders = JSON.parseObject(jsonResult.toString(), Map::class.java) as Map<*, *>
@@ -143,7 +141,9 @@ class FetchTaskRunner(
                     }
                 }
             } catch (e: Exception) {
-                logger.error { "Header 脚本返回格式错误: $e" }
+                logger.error(e) {
+                    "Header 脚本执行失败 source=${source.name.ifBlank { source.id }} id=${source.id} page=${page.pageName()} url=$finalUrl"
+                }
             }
         }
 
@@ -173,8 +173,13 @@ class FetchTaskRunner(
         bindings["java_request"] = req
 
 
-        logger.info { "发起请求 -> [${page::class.simpleName}] URL: $finalUrl  POST_BODY: $finalBody" }
+        logger.info { "发起请求 source=${source.name.ifBlank { source.id }} id=${source.id} page=${page.pageName()} url=$finalUrl method=$method" }
         var rawResponse = httpFetcher.fetch(source.id, source.concurrentRate, req)
+        if (rawResponse.startsWith("ERROR:")) {
+            logger.error {
+                "请求失败 source=${source.name.ifBlank { source.id }} id=${source.id} page=${page.pageName()} url=$finalUrl error=$rawResponse"
+            }
+        }
         bindings["value"] = rawResponse
 
         val responseScript = page.config.responseScript ?: source.globalConfig.responseScript
@@ -182,9 +187,11 @@ class FetchTaskRunner(
             // 调用 JS 引擎执行解密
             // 约定：输入变量名为 'raw'，输出为脚本最后一行或 return 值
             try {
-                rawResponse = JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(responseScript, bindings)).toString()
+                rawResponse = JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(responseScript, bindings)).toString()
             } catch (e: Exception) {
-                logger.error { e }
+                logger.error(e) {
+                    "响应脚本执行失败 source=${source.name.ifBlank { source.id }} id=${source.id} page=${page.pageName()} url=$finalUrl"
+                }
             }
 
         }
@@ -206,10 +213,10 @@ class FetchTaskRunner(
 
         // 2. 确定失效时间
         val now = System.currentTimeMillis()
-        var expiresStr = RuleParser.parseString(response, page.expiresSelector, ctx).toLong()
+        var expiresStr = RuleParser.parseString(response, page.expiresSelector, ctx).toLongOrNull() ?: -1L
 
         //小于当前时间就是失败值或者固定值，加上当前时间戳
-        if (expiresStr < now) {
+        if (expiresStr in 1 until now) {
             expiresStr = expiresStr + now
         }
 
@@ -222,10 +229,29 @@ class FetchTaskRunner(
     }
 
     fun combineUrl(base: String, relative: String): String {
+        val path = relative.trim()
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            return path
+        }
+        if (path.startsWith("//")) {
+            val scheme = base.toHttpUrlOrNull()?.scheme ?: "https"
+            return "$scheme:$path"
+        }
+        if (base.isBlank()) {
+            return path
+        }
+
+        val resolvedUrl = base.toHttpUrlOrNull()?.resolve(path)
+        if (resolvedUrl != null) {
+            return resolvedUrl.toString()
+        }
+
         val b = base.trimEnd('/')
-        val r = relative.trimStart('/')
+        val r = path.trimStart('/')
         return "$b/$r"
     }
 
 }
+
+private fun IPage.pageName(): String = this::class.simpleName ?: this::class.toString()
 

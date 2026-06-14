@@ -17,18 +17,18 @@ import com.zhhz.spider.ui.widget.SelectorEditor
 
 
 @Composable
-fun CatalogRuleForm(catalogRule: CatalogPage?,onOpenJsEditor: (JsEditContext) -> Unit, onUpdate: (CatalogPage) -> Unit) {
+fun CatalogRuleForm(catalogRule: CatalogPage?, highlightedSelectorName: String? = null, onOpenJsEditor: (JsEditContext) -> Unit, onUpdate: (CatalogPage) -> Unit) {
     if (catalogRule == null) {
         Button(onClick = { onUpdate(CatalogPage()) }) { Text("+ 创建目录规则") }
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             FetchConfigEditor("详情页网络配置", catalogRule.config,onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(config = it)) }
-            SelectorEditor("搜索地址 (可选)", catalogRule.urlSelector,onOpenJsEditor = onOpenJsEditor) {
+            SelectorEditor("搜索地址 (可选)", catalogRule.urlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.urlSelector"), onOpenJsEditor = onOpenJsEditor) {
                 onUpdate(catalogRule.copy(urlSelector = it))
             }
-            SelectorEditor("目录列表", catalogRule.chapterListSelector,onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterListSelector = it)) }
-            SelectorEditor("章节名称", catalogRule.chapterNameSelector,onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterNameSelector = it)) }
-            SelectorEditor("章节链接", catalogRule.chapterUrlSelector,onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterUrlSelector = it)) }
+            SelectorEditor("目录列表", catalogRule.chapterListSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.chapterListSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterListSelector = it)) }
+            SelectorEditor("章节名称", catalogRule.chapterNameSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.chapterNameSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterNameSelector = it)) }
+            SelectorEditor("章节链接", catalogRule.chapterUrlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.chapterUrlSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterUrlSelector = it)) }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = { onUpdate(CatalogPage()) }) { Text("初始化目录规则", color = Color.Red) }

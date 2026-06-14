@@ -3,9 +3,8 @@ package com.zhhz.spider.util
 import android.graphics.BitmapFactory
 import android.os.Build
 import coil3.Bitmap
-import com.zhhz.spider.rule.SCRIPT_ENGINE
+import com.zhhz.spider.rule.JsEngineRunner
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.mozilla.javascript.ContextFactory
 import java.io.ByteArrayOutputStream
 import javax.script.ScriptException
 import javax.script.SimpleBindings
@@ -33,7 +32,7 @@ actual fun Bitmap.descrambleAndEncode(
         if (decryptRule.isNotBlank()) {
             try {
                 output =
-                    JsExtensionClass.jsToJavaObject(SCRIPT_ENGINE.eval(decryptRule, bindings)) as Bitmap
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(decryptRule, bindings)) as Bitmap
             } catch (e: ScriptException) {
                 val errorDetail = """
                 JS执行失败！

@@ -1,11 +1,11 @@
 package com.zhhz.spider.repository.impl
 
-import com.alibaba.fastjson2.JSON
+import com.zhhz.spider.constant.BookType
 import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.ChapterDao
 import com.zhhz.spider.db.toDomain
 import com.zhhz.spider.manager.ContextSessionManager
-import com.zhhz.spider.manager.getActiveContext
+import com.zhhz.spider.model.CrawlerStage
 import com.zhhz.spider.network.Book
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.repository.ReaderRepository
@@ -44,12 +44,12 @@ class ReaderRepositoryImpl(
 
             val rule = ruleRepository.getEnabledRules().find { it.id == ruleId }
                 ?: throw Exception("找不到对应的书源规则")
-            val isMangaMode = true // rule.type == BookType.image
+            val isMangaMode = rule.type == BookType.image
 
             val targetBookUrl = bookUrl ?: sessionRepository.loadData()?.url ?: ""
             val ctx = contextSessionManager.getContext(targetBookUrl,ruleId)
 
-            val safeFileName = "${chapterUrl.toMd5()}.txt"
+            val safeFileName = "${"$ruleId|$targetBookUrl|$chapterUrl".toMd5()}.txt"
             val cacheFile  = textCacheDirectory / safeFileName
 
             // 统一离线判定：只要磁盘上有这个文件，说明百分之百缓存成功了！
@@ -72,6 +72,7 @@ class ReaderRepositoryImpl(
             val isBookInLibrary = bookDao.getBookByUrl(targetBookUrl) != null
 
             val data = fetchTaskRunner.fetch(rule, rule.content,chapterUrl , ctx)
+            data.throwIfCrawlerError(rule, CrawlerStage.CONTENT)
 
 
             // 💡 纠正：直接根据类型返回对应的单一 ChapterBlock，不带任何包装
@@ -91,7 +92,7 @@ class ReaderRepositoryImpl(
                     )
                 }
 
-                if (isBookInLibrary) {
+                if (isBookInLibrary && imageUrls.isNotEmpty()) {
                     val serializedJson = Json.encodeToString(imageUrls) // 序列化
                     fileSystem.write(cacheFile) {
                         writeUtf8(serializedJson) // 写入磁盘
@@ -110,7 +111,7 @@ class ReaderRepositoryImpl(
                     it.toString()
                 }.trimEnd()
 
-                if (isBookInLibrary) {
+                if (isBookInLibrary && textContent.isNotBlank()) {
                     fileSystem.write(cacheFile) {
                         writeUtf8(textContent) // 写入磁盘
                     }

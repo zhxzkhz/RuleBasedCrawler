@@ -4,16 +4,14 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
-import coil3.request.CachePolicy
 import coil3.request.ImageRequest
-import coil3.request.transformations
 import coil3.size.Size
 import com.zhhz.spider.model.DownloadStatus
 import com.zhhz.spider.model.DownloadTask
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.ReaderRepository
-import com.zhhz.spider.util.MangaDescrambleTransformation
 import com.zhhz.spider.viewModel.MangaImage
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +20,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.collections.set
+
+private val logger = KotlinLogging.logger {}
 
 class DownloadManager(
     private val catalogRepository: CatalogRepository,
@@ -47,7 +47,7 @@ class DownloadManager(
      */
     suspend fun startDownload(bookUrl: String, ruleId: String, bookTitle: String) = lock.withLock {
         // 防止重复启动
-        if (activeJobs[bookUrl]?.isActive == true) return
+        if (activeJobs[bookUrl]?.isActive == true) return@withLock
 
         // 1. 初始化或更新任务状态
         _downloadTasks.update { current ->
@@ -122,12 +122,13 @@ class DownloadManager(
                     it + (bookUrl to it.getValue(bookUrl).copy(status = DownloadStatus.COMPLETED))
                 }
 
-            } catch (e: CancellationException) {
+            } catch (_: CancellationException) {
                 // 用户暂停或系统取消，属于正常流转
                 _downloadTasks.update {
                     it + (bookUrl to it.getValue(bookUrl).copy(status = DownloadStatus.PAUSED))
                 }
             } catch (e: Exception) {
+                logger.error { e }
                 // 网络崩溃等真异常
                 _downloadTasks.update {
                     it + (bookUrl to it.getValue(bookUrl).copy(status = DownloadStatus.ERROR))

@@ -29,6 +29,7 @@ fun RuleFormWithTabs(
     rule: SourceRule,
     selectedIndex: Int,
     scope : CoroutineScope,
+    highlightedSelectorName: String? = null,
     onOpenJs: (JsEditContext) -> Unit,
     onTabChange: (Int) -> Unit,
     onRuleChange: (SourceRule) -> Unit
@@ -53,23 +54,23 @@ fun RuleFormWithTabs(
                             BasicInfoForm(rule, scope){ onRuleChange(it) }
                         }
                         1 -> { // 搜索页
-                            LoginRuleForm(rule.login, onOpenJsEditor = onOpenJs){
+                            LoginRuleForm(rule.login, highlightedSelectorName = highlightedSelectorName, onOpenJsEditor = onOpenJs){
                                 onRuleChange(rule.copy(login = it))
                             }
                         }
                         2 -> { // 搜索页
-                            SearchRuleForm(rule.search, onOpenJsEditor = onOpenJs){
+                            SearchRuleForm(rule.search, highlightedSelectorName = highlightedSelectorName, onOpenJsEditor = onOpenJs){
                                 onRuleChange(rule.copy(search = it))
                             }
                         }
                         3 -> {
-                            DetailRuleForm(rule.detail, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(detail = it)) }
+                            DetailRuleForm(rule.detail, highlightedSelectorName = highlightedSelectorName, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(detail = it)) }
                         }
                         4 -> {
-                            CatalogRuleForm(rule.catalog, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(catalog = it)) }
+                            CatalogRuleForm(rule.catalog, highlightedSelectorName = highlightedSelectorName, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(catalog = it)) }
                         }
                         5 -> {
-                            ContentRuleForm(rule.content, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(content = it)) }
+                            ContentRuleForm(rule.content, highlightedSelectorName = highlightedSelectorName, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(content = it)) }
                         }
                     }
                 }
@@ -93,6 +94,10 @@ fun RuleFormWithTabs(
     }
 */
 
+}
+
+fun isSelectorHighlighted(current: String?, selectorName: String): Boolean {
+    return current == selectorName || current?.startsWith("$selectorName.") == true
 }
 
 

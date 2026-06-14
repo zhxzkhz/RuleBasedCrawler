@@ -4,7 +4,7 @@ import com.zhhz.spider.db.ChapterDao
 import com.zhhz.spider.db.ChapterEntity
 import com.zhhz.spider.db.toDomain
 import com.zhhz.spider.manager.ContextSessionManager
-import com.zhhz.spider.manager.getActiveContext
+import com.zhhz.spider.model.CrawlerStage
 import com.zhhz.spider.network.Chapter
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.repository.CatalogRepository
@@ -32,6 +32,7 @@ class CatalogRepositoryImpl(
 
             // 2. 搬运原本 RuleApi 的网络抓取逻辑：获取目录页面的 HTML 源码
             val html = fetchTaskRunner.fetch(rule, rule.catalog, catalogUrl, ctx,ctx["bookDetailHtml"])
+            html.throwIfCrawlerError(rule, CrawlerStage.CATALOG)
 
             // 3. 调用爬虫规则引擎：从 HTML 中提取出原始章节列表
             val rawChapters = rule.catalog.getChapters(html, ctx)

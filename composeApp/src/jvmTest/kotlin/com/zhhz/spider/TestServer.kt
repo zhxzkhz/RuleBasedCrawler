@@ -5,14 +5,26 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlin.test.Test
+import java.util.concurrent.TimeUnit
 
-class TestServer {
+class TestServer(private val port: Int = 8080) {
+    private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
+    val baseUrl: String = "http://localhost:$port"
 
-    @Test
-    fun main() {
-        // 💡 启动本地测试服务器，监听 8080 端口
-        embeddedServer(Netty, port = 8080) {
+    fun start(): TestServer {
+        if (server == null) {
+            server = createServer().start(wait = false)
+        }
+        return this
+    }
+
+    fun stop() {
+        server?.stop(1, 5, TimeUnit.SECONDS)
+        server = null
+    }
+
+    private fun createServer(): EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration> {
+        return embeddedServer(Netty, port = port) {
             routing {
 
                 // 1. 模拟搜索接口 (返回 HTML 格式的搜索列表)
@@ -27,17 +39,17 @@ class TestServer {
                         <div class="book-list">
                             <!-- 模拟搜索到的第一本书 -->
                             <div class="book-item">
-                                <a class="title" href="http://localhost:8080/book/1001">《测试小说：${keyword}神话》</a>
+                                <a class="title" href="$baseUrl/book/1001">《测试小说：${keyword}神话》</a>
                                 <span class="author">作者：张三</span>
                                 <span class="type">玄幻</span>
-                                <img class="cover" src="http://localhost:8080/images/cover1.jpg"/>
+                                <img class="cover" src="$baseUrl/images/cover1.jpg"/>
                             </div>
                             <!-- 模拟搜索到的第二本书 (漫画) -->
                             <div class="book-item">
-                                <a class="title" href="http://localhost:8080/book/2002">《测试漫画：${keyword}之王》</a>
+                                <a class="title" href="$baseUrl/book/2002">《测试漫画：${keyword}之王》</a>
                                 <span class="author">作者：李四</span>
                                 <span class="type">漫画</span>
-                                <img class="cover" src="http://localhost:8080/images/cover2.jpg"/>
+                                <img class="cover" src="$baseUrl/images/cover2.jpg"/>
                             </div>
                         </div>
                     </body>
@@ -62,7 +74,7 @@ class TestServer {
                         <span class="status">$status</span>
                         <div class="book-desc">$desc</div>
                         <!-- 💡 指向目录页的链接 -->
-                        <a class="catalog-link" href="http://localhost:8080/book/$bookId/catalog">查看完整目录</a>
+                        <a class="catalog-link" href="$baseUrl/book/$bookId/catalog">查看完整目录</a>
                     </body>
                     </html>
                 """.trimIndent()
@@ -79,9 +91,9 @@ class TestServer {
                         <html>
                         <body>
                             <ul class="chapter-list">
-                                <li><a href="http://localhost:8080/chapter/1001_1">第一章：陨落的天才</a></li>
-                                <li><a href="http://localhost:8080/chapter/1001_2">第二章：斗气大陆</a></li>
-                                <li><a href="http://localhost:8080/chapter/1001_3">第三章：退婚之辱</a></li>
+                                <li><a href="$baseUrl/chapter/1001_1">第一章：陨落的天才</a></li>
+                                <li><a href="$baseUrl/chapter/1001_2">第二章：斗气大陆</a></li>
+                                <li><a href="$baseUrl/chapter/1001_3">第三章：退婚之辱</a></li>
                             </ul>
                         </body>
                         </html>
@@ -92,8 +104,8 @@ class TestServer {
                         <html>
                         <body>
                             <ul class="chapter-list">
-                                <li><a href="http://localhost:8080/chapter/2002_1">第1话：觉醒之日</a></li>
-                                <li><a href="http://localhost:8080/chapter/2002_2">第2话：神秘力量</a></li>
+                                <li><a href="$baseUrl/chapter/2002_1">第1话：觉醒之日</a></li>
+                                <li><a href="$baseUrl/chapter/2002_2">第2话：神秘力量</a></li>
                             </ul>
                         </body>
                         </html>
@@ -127,9 +139,9 @@ class TestServer {
                         <body>
                             <h1 class="chapter-title">测试漫画 - $chapterId</h1>
                             <div class="manga-list">
-                                <img class="manga-page" src="http://localhost:8080/images/manga_p1.jpg"/>
-                                <img class="manga-page" src="http://localhost:8080/images/manga_p2.jpg"/>
-                                <img class="manga-page" src="http://localhost:8080/images/manga_p3.jpg"/>
+                                <img class="manga-page" src="$baseUrl/images/manga_p1.jpg"/>
+                                <img class="manga-page" src="$baseUrl/images/manga_p2.jpg"/>
+                                <img class="manga-page" src="$baseUrl/images/manga_p3.jpg"/>
                             </div>
                         </body>
                         </html>
@@ -138,6 +150,6 @@ class TestServer {
                     call.respondText(html, ContentType.Text.Html)
                 }
             }
-        }.start(wait = true)
+        }
     }
 }
