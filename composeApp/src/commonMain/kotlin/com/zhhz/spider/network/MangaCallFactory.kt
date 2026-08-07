@@ -76,4 +76,33 @@ class MangaCallFactory(
             request.newBuilder().headers(newRequestBuilder.removeAll("X-Internal-Rule-Id").removeAll("X-Internal-Book-Url").build()).build()
         )
     }
+
+    fun newCall(
+        request: okhttp3.Request,
+        rule: com.zhhz.spider.rule.SourceRule,
+        ctx: com.zhhz.spider.rule.VariableContext
+    ): okhttp3.Call {
+        val newRequestBuilder = request.headers.newBuilder()
+        val bindings = SimpleBindings().apply {
+            put("java", JsExtensionClass)
+            put("java_log", logger)
+            put("java_ctx", ctx)
+            put("java_url", request.url.toString())
+            put("java_source", rule)
+            put("request", request)
+            put("newRequestBuilder", newRequestBuilder)
+        }
+        if (!rule.globalConfig.headerScript.isNullOrBlank()) {
+            val dynamicHeaders = JsExtensionClass.jsToJavaObject(
+                JsEngineRunner.eval(rule.globalConfig.headerScript!!, bindings)
+            )
+            if (dynamicHeaders is String) {
+                JSON.parseObject(dynamicHeaders, Map::class.java).forEach { (key, value) ->
+                    newRequestBuilder.set(key.toString(), value.toString())
+                }
+            }
+        }
+        val client = httpFetcher.getExistingClient(rule.id) ?: httpFetcher.baseClient
+        return client.newCall(request.newBuilder().headers(newRequestBuilder.build()).build())
+    }
 }

@@ -1,7 +1,7 @@
 package com.zhhz.spider.viewModel
 
 import androidx.lifecycle.viewModelScope
-import com.zhhz.spider.ReaderRoute
+import com.zhhz.spider.ReaderGraph
 import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.network.Book
 import com.zhhz.spider.network.Chapter
@@ -143,7 +143,7 @@ class DetailViewModel(
         // 2. 传递轻量级基本类型路由对象跳转
         sendEffect(
             DetailUiEffect.NavigateToReader(
-                route = ReaderRoute(
+                route = ReaderGraph.Reader(
                     bookUrl = state.bookUrl,
                     chapterIndex = chapter.index,
                     chapterTitle = state.title,
@@ -257,7 +257,7 @@ sealed class DetailUiIntent : UiIntent {
 sealed class DetailUiEffect : UiEffect {
     data class ShowToast(val message: String) : DetailUiEffect()
     // 跳转到阅读器/目录页，依然只传基本类型
-    data class NavigateToReader(val route: ReaderRoute) : DetailUiEffect()
+    data class NavigateToReader(val route: ReaderGraph.Reader) : DetailUiEffect()
 
     data object NavigateBack : DetailUiEffect()
 }

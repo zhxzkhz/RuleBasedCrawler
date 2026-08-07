@@ -5,7 +5,6 @@ import coil3.SingletonImageLoader
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
-import coil3.size.Size
 import com.zhhz.spider.model.DownloadStatus
 import com.zhhz.spider.model.DownloadTask
 import com.zhhz.spider.repository.CatalogRepository
@@ -157,7 +156,8 @@ fun imageRequest(
 ): ImageRequest {
     val builder = ImageRequest.Builder(context)
         .data(image.url)
-        .size(Size.ORIGINAL)
+        .memoryCacheKey(image.url)
+        .diskCacheKey(image.url)
 
     val headers = NetworkHeaders.Builder().set("X-Internal-Rule-Id", ruleId)
         .set("X-Internal-Book-Url", bookUrl)

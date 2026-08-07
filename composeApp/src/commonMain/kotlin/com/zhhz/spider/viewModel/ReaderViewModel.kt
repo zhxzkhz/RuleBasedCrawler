@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import com.zhhz.spider.constant.BookType
 import com.zhhz.spider.network.Book
 import com.zhhz.spider.network.Chapter
+import com.zhhz.spider.network.hasLegacyInvalidTitle
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.ReaderRepository
 import com.zhhz.spider.repository.RuleRepository
@@ -58,12 +59,52 @@ class ReaderViewModel(
                     fetchChapterContent(targetChapter.url, intent.index, uiState.value.ruleId, isAppend = false)
                 }
             }
-            is ReaderUiIntent.ToggleMenu -> updateState { copy(isMenuVisible = !isMenuVisible) }
+            is ReaderUiIntent.ToggleMenu -> {
+                updateState {
+                    if (isSettingsVisible) {
+                        copy(isSettingsVisible = false)
+                    } else {
+                        copy(isMenuVisible = !isMenuVisible)
+                    }
+                }
+            }
             is ReaderUiIntent.NavigateBack -> {
                 handleUpdateReadProgress(uiState.value.currentIndex, uiState.value.currentProgress)
                 sendEffect(ReaderUiEffect.NavigateBack)
             }
             is ReaderUiIntent.UpdateReadProgress -> handleUpdateReadProgress(intent.index, intent.progress)
+            is ReaderUiIntent.NavigateToCatalog -> {
+                viewModelScope.launch {
+                    sendEffect(ReaderUiEffect.NavigateToCatalogPage(uiState.value.bookUrl, uiState.value.ruleId))
+                }
+            }
+            is ReaderUiIntent.ToggleSettingsPanel -> {
+                updateState { copy(isSettingsVisible = !isSettingsVisible, isMenuVisible = false) }
+            }
+            is ReaderUiIntent.ChangeFontSize -> {
+                updateState {
+                    val newSize = (settings.fontSize + intent.delta).coerceIn(12, 36)
+                    copy(settings = settings.copy(fontSize = newSize))
+                }
+            }
+            is ReaderUiIntent.ChangeTheme -> {
+                updateState {
+                    copy(settings = settings.copy(backgroundColor = intent.background, textColor = intent.text))
+                }
+            }
+            is ReaderUiIntent.ToggleImmersiveMode -> {
+                updateState {
+                    copy(settings = settings.copy(isImmersiveMode = !settings.isImmersiveMode))
+                }
+            }
+            is ReaderUiIntent.ReloadCurrentMangaChapter -> {
+                updateState {
+                    copy(
+                        imageReloadVersion = imageReloadVersion + 1,
+                        isMenuVisible = false
+                    )
+                }
+            }
         }
     }
 
@@ -81,18 +122,19 @@ class ReaderViewModel(
                 // ==========================================
                 // 2. 书籍信息装填与【书架状态确认】
                 // ==========================================
-                var activeBook = sessionRepository.loadData()
+                val sessionBook = sessionRepository.loadData()
                 val localBook = readerRepository.loadData(bookUrl)
                 val isBookInLibrary = localBook != null
 
                 updateState { copy(isInBookshelf = isBookInLibrary) }
 
-                if (activeBook == null) {
-                    activeBook = localBook ?: Book(
+                var activeBook = sessionBook ?: localBook ?: Book(
                         title = "未知书籍", author = "", cover = "", url = bookUrl, ruleId = ruleId
                     )
+                if (sessionBook == null) {
                     sessionRepository.saveData(activeBook)
                 }
+                updateState { copy(bookTitle = activeBook.title.ifBlank { "目录" }) }
 
                 // ==========================================
                 // 3. 确定阅读起点与页内进度初始化
@@ -120,6 +162,11 @@ class ReaderViewModel(
                 // 4. 三层目录恢复防线
                 // ==========================================
                 var catalogList = sessionRepository.loadCatalog()
+
+                if (catalogList.any(Chapter::hasLegacyInvalidTitle)) {
+                    catalogList = emptyList()
+                    sessionRepository.saveCatalog(emptyList())
+                }
 
                 if (catalogList.isEmpty() && bookUrl.isNotBlank() && isBookInLibrary) {
                     catalogList = catalogRepository.loadData(bookUrl)
@@ -352,8 +399,16 @@ data class ChapterContent(
     val blocks: List<ChapterBlock> = emptyList()
 )
 
+data class ReaderSettings(
+    val fontSize: Int = 18,
+    val backgroundColor: Long = 0xFFFAF7F0,
+    val textColor: Long = 0xFF333333,
+    val isImmersiveMode: Boolean = false
+)
+
 data class ReaderUiState(
     val bookUrl: String = "",
+    val bookTitle: String = "",
     val bookType: Int = BookType.text,
     val title: String = "正在加载...",
     val content: ChapterContent = ChapterContent(),
@@ -372,12 +427,26 @@ data class ReaderUiState(
 
     val isLoading: Boolean = true,
     val isMenuVisible: Boolean = false, // 点击屏幕中央显示的菜单状态
+    val imageReloadVersion: Int = 0,
+
+    val settings: ReaderSettings = ReaderSettings(),
+    val isSettingsVisible: Boolean = false // 排版设置面板状态
 
 ) : UiState
 
 sealed class ReaderUiIntent : UiIntent {
     // 初始化内容
     data class Init(val bookUrl: String, val chapterIndex: Int, val ruleId: String) : ReaderUiIntent()
+
+    object NavigateToCatalog : ReaderUiIntent()
+
+    // 设置相关意图
+    object ToggleSettingsPanel : ReaderUiIntent()
+    data class ChangeFontSize(val delta: Int) : ReaderUiIntent()
+    data class ChangeTheme(val background: Long, val text: Long) : ReaderUiIntent()
+    object ToggleImmersiveMode : ReaderUiIntent()
+    object ReloadCurrentMangaChapter : ReaderUiIntent()
+
     // 切换章节
     data object GoNext : ReaderUiIntent()
     data object GoPrev : ReaderUiIntent()
@@ -393,5 +462,6 @@ sealed class ReaderUiIntent : UiIntent {
 
 sealed class ReaderUiEffect : UiEffect {
     data class ShowToast(val message: String) : ReaderUiEffect()
-    data object NavigateBack : ReaderUiEffect()
+    object NavigateBack : ReaderUiEffect()
+    data class NavigateToCatalogPage(val bookUrl: String, val ruleId: String) : ReaderUiEffect()
 }

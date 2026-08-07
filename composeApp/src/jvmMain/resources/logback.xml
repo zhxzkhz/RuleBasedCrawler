@@ -14,8 +14,11 @@
         </encoder>
     </appender>
 
+    <appender name="DEBUG_BUFFER" class="com.zhhz.spider.util.DebugLogbackAppender" />
+
     <!-- 设置日志级别（可以根据你的需要改成 DEBUG 或 INFO） -->
     <root level="INFO">
         <appender-ref ref="STDOUT" />
+        <appender-ref ref="DEBUG_BUFFER" />
     </root>
 </configuration>

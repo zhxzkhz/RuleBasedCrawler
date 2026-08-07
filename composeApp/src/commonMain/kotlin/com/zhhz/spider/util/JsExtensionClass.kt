@@ -16,7 +16,8 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.mozilla.javascript.NativeArray
-import org.mozilla.javascript.NativeJavaObject
+import org.mozilla.javascript.Undefined
+import org.mozilla.javascript.Wrapper
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.lang.Thread.sleep
@@ -242,14 +243,21 @@ object JsExtensionClass {
      * @param value js类型
      * @return java类型
      */
-    fun jsToJavaObject (value: Any?): Any {
-        if (value == null) return ""
-        return if (value is NativeArray) {
-            value.toList()
-        } else if (value.javaClass == NativeJavaObject::class.java) {
-            (value as NativeJavaObject).unwrap()
-        } else {
-            value
+    fun jsToJavaObject(value: Any?): Any {
+        return when (value) {
+            null, is Undefined -> ""
+            is NativeArray -> value.toList().map(::jsToJavaObject)
+            is Wrapper -> jsToJavaObject(value.unwrap())
+            is CharSequence -> value.toString()
+            is MutableMap<*, *> -> {
+                @Suppress("UNCHECKED_CAST")
+                val mutableMap = value as MutableMap<Any?, Any?>
+                mutableMap.keys.toList().forEach { key ->
+                    mutableMap[key] = jsToJavaObject(mutableMap[key])
+                }
+                value
+            }
+            else -> value
         }
     }
 

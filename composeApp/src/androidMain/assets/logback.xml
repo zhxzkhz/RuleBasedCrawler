@@ -1,0 +1,14 @@
+<configuration>
+    <appender name="LOGCAT" class="ch.qos.logback.classic.android.LogcatAppender">
+        <encoder>
+            <pattern>[%thread] %-5level %logger{24} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="DEBUG_BUFFER" class="com.zhhz.spider.util.DebugLogbackAppender" />
+
+    <root level="INFO">
+        <appender-ref ref="LOGCAT" />
+        <appender-ref ref="DEBUG_BUFFER" />
+    </root>
+</configuration>

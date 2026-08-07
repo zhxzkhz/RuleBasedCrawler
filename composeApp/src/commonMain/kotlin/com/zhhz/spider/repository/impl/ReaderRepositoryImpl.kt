@@ -17,6 +17,7 @@ import com.zhhz.spider.viewModel.ChapterBlock
 import com.zhhz.spider.viewModel.MangaImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okio.FileSystem
@@ -80,7 +81,11 @@ class ReaderRepositoryImpl(
                 val imageUrls = rule.content.getContent(data, ctx).map {
                     ctx["chapterUrl"] = chapterUrl
                     val headers = if (rule.content.imageHeaders.steps.isNotEmpty()){
-                        Json.decodeFromString<Map<String, String>>(RuleParser.parseString(data, rule.content.imageHeaders, ctx)).toMutableMap() // 💡 塞入自动生成的完美 Headers
+                        decodeImageHeaders(
+                            rawHeaders = RuleParser.parseString(data, rule.content.imageHeaders, ctx),
+                            sourceName = rule.name.ifBlank { rule.id },
+                            chapterUrl = chapterUrl
+                        )
                     } else {
                         mutableMapOf()
                     }
@@ -167,4 +172,36 @@ class ReaderRepositoryImpl(
             bookDao.getBookByUrl(bookUrl)?.toDomain()
         }
     }
+}
+
+internal fun decodeImageHeaders(
+    rawHeaders: String,
+    sourceName: String,
+    chapterUrl: String
+): MutableMap<String, String> {
+    val normalizedHeaders = rawHeaders.trim()
+    if (normalizedHeaders.isBlank()) {
+        throw IllegalArgumentException("图片 Headers 解析失败：规则返回为空 source=$sourceName chapter=$chapterUrl")
+    }
+
+    return try {
+        Json.decodeFromString<Map<String, String>>(normalizedHeaders).toMutableMap()
+    } catch (e: IllegalArgumentException) {
+        throw invalidImageHeadersException(sourceName, chapterUrl, normalizedHeaders, e)
+    } catch (e: SerializationException) {
+        throw invalidImageHeadersException(sourceName, chapterUrl, normalizedHeaders, e)
+    }
+}
+
+private fun invalidImageHeadersException(
+    sourceName: String,
+    chapterUrl: String,
+    rawHeaders: String,
+    cause: Throwable
+): IllegalArgumentException {
+    val preview = rawHeaders.take(300)
+    return IllegalArgumentException(
+        "图片 Headers 解析失败：必须返回 JSON 对象且键和值都为字符串 source=$sourceName chapter=$chapterUrl raw=$preview",
+        cause
+    )
 }

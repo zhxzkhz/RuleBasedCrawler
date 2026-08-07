@@ -1,5 +1,8 @@
 package com.zhhz.spider.rule
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class ParseTraceStatus {
     OK,
     EMPTY,
@@ -7,6 +10,13 @@ enum class ParseTraceStatus {
     SKIPPED
 }
 
+@Serializable
+data class ParseTraceValue(
+    val text: String,
+    val truncated: Boolean = false
+)
+
+@Serializable
 data class ParseTraceEvent(
     val selectorName: String,
     val stepIndex: Int,
@@ -16,7 +26,9 @@ data class ParseTraceEvent(
     val inputCount: Int,
     val outputCount: Int,
     val status: ParseTraceStatus,
-    val message: String = ""
+    val message: String = "",
+    val inputValues: List<ParseTraceValue> = emptyList(),
+    val outputValues: List<ParseTraceValue> = emptyList()
 )
 
 data class ParseTraceResult<T>(

@@ -1,6 +1,5 @@
 package com.zhhz.spider.ui.widget
 
-import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -16,30 +15,33 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.SingletonImageLoader
+import coil3.memory.MemoryCache
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
-import coil3.compose.SubcomposeAsyncImage
-import coil3.compose.SubcomposeAsyncImageContent
 import coil3.request.ImageRequest
 import com.zhhz.spider.manager.imageRequest
 import com.zhhz.spider.viewModel.ChapterBlock
 import com.zhhz.spider.viewModel.MangaImage
 import com.zhhz.spider.viewModel.ReaderUiState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+
+private data class MangaImageEntry(
+    val image: MangaImage,
+    val isImageDecrypt: Boolean
+)
 
 /**
  * 💡 纯函数算法：根据 LazyColumn 里的绝对可见索引，推算出它属于哪一个章节。
@@ -119,25 +121,36 @@ fun NovelReaderView(
 ) {
     // 移除点击时的水波纹，让阅读体验更纯粹
     val interactionSource = remember { MutableInteractionSource() }
+    val currentBlock = uiState.content.blocks.firstOrNull()
+    val chapterTitle = currentBlock?.chapterTitle?.takeIf { it.isNotBlank() } ?: uiState.title
+    val bodyText = currentBlock?.text.orEmpty()
 
     SelectionContainer {
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).clickable(
+            modifier = Modifier.fillMaxSize().background(Color(uiState.settings.backgroundColor)).verticalScroll(rememberScrollState()).clickable(
                     interactionSource = interactionSource, indication = null, onClick = onToggleMenu
                 ).padding(16.dp)
         ) {
             // 标题
             Text(
-                text = uiState.title, style = MaterialTheme.typography.headlineSmall, color = Color.Black
+                text = chapterTitle,
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color(uiState.settings.textColor),
+                fontWeight = FontWeight.Bold
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 正文
-            Text(
-                text = uiState.content.blocks.first().text, fontSize = 18.sp, lineHeight = 30.sp, // 舒适的行间距
-                color = Color(0xFF333333)
-            )
+            if (bodyText.isBlank()) {
+                EmptyReaderContent(text = "本章暂无正文内容")
+            } else {
+                Text(
+                    text = bodyText,
+                    fontSize = uiState.settings.fontSize.sp,
+                    lineHeight = (uiState.settings.fontSize * 1.6).sp, // 舒适的行间距
+                    color = Color(uiState.settings.textColor)
+                )
+            }
 
             // 底部翻页控制器
             Row(
@@ -175,29 +188,40 @@ fun MangaReaderView(
 
     // 💡 1. 将所有已加载的章节区块中的所有 MangaImage 展平为一个连续的大列表
     val flattenedImages = remember(uiState.content.blocks) {
-        uiState.content.blocks.flatMap { it.images }
+        uiState.content.blocks.flatMap { block ->
+            block.images.map { image -> MangaImageEntry(image = image, isImageDecrypt = block.isImageDecrypt) }
+        }
     }
 
 
     val imageLoader = SingletonImageLoader.get(context)
+    var appliedReloadVersion by remember { mutableIntStateOf(0) }
 
-    // 💡 1. 常驻内存的按需缓存字典
-    val requestCache = remember { mutableMapOf<String, ImageRequest>() }
+    LaunchedEffect(uiState.imageReloadVersion) {
+        if (uiState.imageReloadVersion == 0) return@LaunchedEffect
+        val currentBlock = uiState.content.blocks.firstOrNull { it.index == uiState.currentIndex }
+            ?: return@LaunchedEffect
+        currentBlock.images.forEach { image ->
+            imageLoader.memoryCache?.remove(MemoryCache.Key(image.url))
+            imageLoader.diskCache?.remove(image.url)
+        }
+        appliedReloadVersion = uiState.imageReloadVersion
+    }
 
-    // 💡 2. 核心辅助函数：按需创建 (Lazy Evaluation)
-    // 无论是预加载还是 UI 渲染，都要找这张图。没有？现场建并塞入缓存！有？直接返回！
-    val getOrBuildRequest: (MangaImage) -> ImageRequest = { mangaImage ->
-        requestCache.getOrPut(mangaImage.url) {
+    val buildRequest: (MangaImage, Boolean) -> ImageRequest = { mangaImage, isImageDecrypt ->
+        imageRequest(ruleId, uiState.bookUrl, mangaImage, isImageDecrypt, context)
+    }
+    val preloadedImages = remember { mutableSetOf<String>() }
 
-            val newRequest = imageRequest(
-                ruleId, uiState.bookUrl, mangaImage, uiState.content.blocks.first().isImageDecrypt, context
-            )
-
-            // 💡 一步到位：在创建时直接扔给 Coil 队列。
-            // 因为 getOrPut 的闭包只会在 key 不存在时运行一次，所以这里保证了 0 重复 enqueue！
-            imageLoader.enqueue(newRequest)
-
-            newRequest
+    // 内容到达后立即预取首屏及下一屏，避免预取依赖第一次滚动事件。
+    LaunchedEffect(flattenedImages, uiState.currentProgress) {
+        val preloadStart = calculateImageIndex(uiState.content.blocks, uiState.currentProgress)
+            .coerceIn(0, flattenedImages.size)
+        flattenedImages.drop(preloadStart).take(8).forEach { entry ->
+            val key = "${entry.image.url}|${entry.isImageDecrypt}"
+            if (preloadedImages.add(key)) {
+                imageLoader.enqueue(buildRequest(entry.image, entry.isImageDecrypt))
+            }
         }
     }
 
@@ -220,20 +244,20 @@ fun MangaReaderView(
                 if (lastVisibleIndex == null || flattenedImages.isEmpty()) return@collect
 
                 // 💡 4. 核心：通过算法，将绝对索引精准转换为没有 Header 污染的“纯图片绝对索引”！
-                val realImageIndex = maxOf(0, lastVisibleIndex - (uiState.currentProgress + 1))
+                val realImageIndex = calculateImageIndex(uiState.content.blocks, lastVisibleIndex)
 
                 val preloadCount = 5
 
                 // 💡 5. 此时进行切片，绝对不会再发生越界和空列表的问题，100% 精准截取后续 5 张图！
-                val startIndex = minOf(realImageIndex, flattenedImages.size)
+                val startIndex = minOf(realImageIndex + 1, flattenedImages.size)
                 val endIndex = minOf(startIndex + preloadCount, flattenedImages.size)
 
                 val imagesToPreload = flattenedImages.subList(startIndex, endIndex)
 
-                // 扔给后台线程去静默队列下载
-                launch(Dispatchers.IO) {
-                    imagesToPreload.forEach { mangaImage ->
-                        getOrBuildRequest(mangaImage)
+                imagesToPreload.forEach { entry ->
+                    val key = "${entry.image.url}|${entry.isImageDecrypt}"
+                    if (preloadedImages.add(key)) {
+                        imageLoader.enqueue(buildRequest(entry.image, entry.isImageDecrypt))
                     }
                 }
             }
@@ -263,7 +287,7 @@ fun MangaReaderView(
     }
 
     LazyColumn(
-        state = listState, modifier = Modifier.fillMaxSize().clickable(
+        state = listState, modifier = Modifier.fillMaxSize().background(Color.Black).clickable(
                 interactionSource = interactionSource, indication = null, onClick = onToggleMenu
             )
     ) {
@@ -314,89 +338,57 @@ fun MangaReaderView(
             } else {
 
                 // 2. 渲染该章节的所有图片
-                items(block.images) { image ->
-                    val request = imageRequest(ruleId, uiState.bookUrl, image, block.isImageDecrypt, context)
-                    var aspectRatio by rememberSaveable(image.url) { mutableStateOf(0f) }
-                    //首次加载时，根据图片比例设置占位高度
-                    if (false) {
+                items(block.images, key = { it.url }) { image ->
+                    var retryVersion by remember(image.url) { mutableIntStateOf(0) }
+                    // UI painter 独占自己的请求，避免与后台预取共享执行状态。
+                    val request = remember(image.url, block.isImageDecrypt, retryVersion, appliedReloadVersion) {
+                        buildRequest(image, block.isImageDecrypt)
+                    }
+
+                    // AsyncImage 会根据实际布局约束选择解码尺寸，并在状态变化后主动重测量。
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        var painterState by remember(image.url, retryVersion, appliedReloadVersion) {
+                            mutableStateOf<AsyncImagePainter.State?>(null)
+                        }
+
                         AsyncImage(
-                            model = request, contentDescription = "Manga Page", modifier = Modifier.fillMaxWidth()
-                                // 关键：预设一个大致比例，防止加载时高度跳动
-                                .then(
-                                    if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio)
-                                    else Modifier.height(500.dp) // 初始占位高度
-                                ), contentScale = ContentScale.FillWidth, // 宽度铺满，高度自适应
-                            onState = { state ->
-                                when (state) {
-                                    is AsyncImagePainter.State.Success -> {
-                                        println("加载成功 $image")
-                                        val size = state.painter.intrinsicSize
-                                        if (size.width > 0 && size.height > 0) {
-                                            aspectRatio = size.width / size.height
-                                        }
-                                    }
-
-                                    else -> Unit
-                                }
-                            })
-                    } else {
-
-                        // ==========================================
-                        // 🎨 方案二：高画质动效模式 (Dynamic Loading) —— 丝滑旋转菊花与淡入
-                        // ==========================================
-                        SubcomposeAsyncImage(
                             model = request,
                             contentDescription = null,
                             contentScale = ContentScale.FillWidth,
-                            modifier = Modifier.fillMaxSize().then(
-                                if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio)
-                                else Modifier.height(500.dp) // 初始占位高度
-                            )
-                        ) {
-                            val state = painter.state.value
-                            when (state) {
-                                is AsyncImagePainter.State.Loading -> {
-                                    // 💡 转圈动画，黑夜底色
-                                    Box(
-                                        modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(32.dp),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            strokeWidth = 3.dp
-                                        )
-                                    }
-                                }
-                                is AsyncImagePainter.State.Error -> {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("图片加载失败", color = Color.Gray)
-                                        Button(onClick = {
-                                            this@SubcomposeAsyncImage.painter.restart()
-                                        }) {
-                                            Text("重试")
-                                        }
-                                    }
-                                }
-                                is AsyncImagePainter.State.Success -> {
-                                    val size = state.painter.intrinsicSize
-                                    if (size.width > 0 && size.height > 0) {
-                                        aspectRatio = size.width / size.height
-                                    }
-                                    // 💡 成功加载后，使用 Crossfade（淡入）动效，体验无敌丝滑
-                                    Crossfade(targetState = true) {
-                                        SubcomposeAsyncImageContent()
-                                    }
-                                }
-                                else -> {
+                            modifier = Modifier.fillMaxWidth(),
+                            onState = { painterState = it }
+                        )
 
+                        // 状态遮罩层
+                        when (painterState) {
+                            is AsyncImagePainter.State.Empty,
+                            is AsyncImagePainter.State.Loading -> {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(300.dp).background(Color(0xFF1E1E1E)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(32.dp),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        strokeWidth = 3.dp
+                                    )
                                 }
                             }
+                            is AsyncImagePainter.State.Error -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().height(300.dp).background(Color(0xFF1E1E1E)),
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("图片加载失败", color = Color.Gray)
+                                    Spacer(Modifier.height(12.dp))
+                                    Button(onClick = { retryVersion++ }) {
+                                        Text("重试")
+                                    }
+                                }
+                            }
+                            else -> Unit
                         }
-
                     }
                 }
 
@@ -418,3 +410,17 @@ fun MangaReaderView(
     }
 }
 
+@Composable
+private fun EmptyReaderContent(text: String) {
+    Box(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 260.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = Color(0xFF7A7164),
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge
+        )
+    }
+}

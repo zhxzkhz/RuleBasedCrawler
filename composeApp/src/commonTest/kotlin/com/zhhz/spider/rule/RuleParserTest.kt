@@ -1,5 +1,10 @@
 package com.zhhz.spider.rule
 
+import com.alibaba.fastjson2.JSONObject
+import com.zhhz.spider.util.JsExtensionClass
+import com.zhhz.spider.network.Chapter
+import com.zhhz.spider.network.hasLegacyInvalidTitle
+import org.mozilla.javascript.Wrapper
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -133,4 +138,66 @@ class RuleParserTest {
 
         assertEquals("value/{{ missing }}", RuleParser.parseString("input", selector, ctx))
     }
+
+    @Test
+    fun javascriptWrapperCollectionsAreRecursivelyUnwrapped() {
+        val wrapper = object : Wrapper {
+            override fun unwrap(): Any = listOf("Chapter 1", listOf("Chapter 2"))
+        }
+
+        assertEquals(
+            listOf("Chapter 1", listOf("Chapter 2")),
+            JsExtensionClass.jsToJavaObject(wrapper)
+        )
+    }
+
+    @Test
+    fun rhinoCharSequenceInsideJsonObjectBecomesJavaString() {
+        val jsonObject = JSONObject.of(
+            "title", TestCharSequence("第1話"),
+            "id", "1169536"
+        )
+
+        val converted = JsExtensionClass.jsToJavaObject(jsonObject) as JSONObject
+
+        assertTrue(converted["title"] is String)
+        assertEquals("第1話", converted.getString("title"))
+        assertEquals("1169536", converted.getString("id"))
+    }
+
+    @Test
+    fun legacySerializedCollectionTitleIsRejected() {
+        assertTrue(Chapter(0, "{\"empty\":false}", "/chapter/1").hasLegacyInvalidTitle())
+    }
+
+    @Test
+    fun traceCapturesEachStepInputAndOutputValues() {
+        val html = """
+            <article><a class="title" href="/chapter/1">Chapter One</a></article>
+        """.trimIndent()
+        val selector = Selector(
+            steps = listOf(
+                ParseStep(type = StepType.CSS, rule = "article", extractType = ExtractType.ELEMENT),
+                ParseStep(type = StepType.CSS, rule = "a.title", extractType = ExtractType.TEXT)
+            )
+        )
+
+        val result = RuleParser.traceString(html, selector, mutableMapOf(), "CatalogPage.chapterNameSelector")
+
+        assertEquals("Chapter One", result.value)
+        assertEquals(2, result.events.size)
+        assertTrue(result.events.first().inputValues.single().text.contains("<article>"))
+        assertEquals(
+            result.events.first().outputValues.single().text,
+            result.events.last().inputValues.single().text
+        )
+        assertEquals("Chapter One", result.events.last().outputValues.single().text)
+    }
+}
+
+private class TestCharSequence(private val value: String) : CharSequence {
+    override val length: Int get() = value.length
+    override fun get(index: Int): Char = value[index]
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = value.subSequence(startIndex, endIndex)
+    override fun toString(): String = value
 }

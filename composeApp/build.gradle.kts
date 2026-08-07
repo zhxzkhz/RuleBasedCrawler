@@ -30,7 +30,8 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.activity.compose)
-            implementation("uk.uuid.slf4j:slf4j-android:2.0.17-0")
+            implementation("com.github.tony19:logback-android:3.0.0")
+            implementation("org.nanohttpd:nanohttpd:2.3.1")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -181,4 +182,3 @@ compose.desktop {
         }
     }
 }
-

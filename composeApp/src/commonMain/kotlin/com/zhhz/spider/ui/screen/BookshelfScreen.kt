@@ -21,7 +21,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhhz.spider.ReaderRoute
+import com.zhhz.spider.ReaderGraph
+import com.zhhz.spider.rememberBookExportDirectoryAction
 import com.zhhz.spider.model.DownloadStatus
 import com.zhhz.spider.model.DownloadTask
 import com.zhhz.spider.network.Book
@@ -39,12 +40,30 @@ import rulebasedcrawler.composeapp.generated.resources.*
 fun BookshelfScreen(
     viewModel: BookshelfViewModel,
     onGoToSearch: () -> Unit,
-    onNavigateToReader: (ReaderRoute) -> Unit,
+    onNavigateToReader: (ReaderGraph.Reader) -> Unit,
     onOpenRule: (Boolean) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var showExportOptionDialog by remember { mutableStateOf(false) }
+    var pendingOnlyCached by remember { mutableStateOf(false) }
+    var pendingConcurrencyLimit by remember { mutableIntStateOf(4) }
+    var pendingDelayMs by remember { mutableLongStateOf(0L) }
+    val exportDirectoryAction = rememberBookExportDirectoryAction { result ->
+        result.onSuccess { directory ->
+            viewModel.processIntent(
+                BookshelfUiIntent.ExportSelectedBooks(
+                    destinationDirectory = directory,
+                    onlyCached = pendingOnlyCached,
+                    concurrencyLimit = pendingConcurrencyLimit,
+                    delayMs = pendingDelayMs
+                )
+            )
+        }.onFailure {
+            scope.launch { snackbarHostState.showSnackbar("选择导出目录失败: ${it.message}") }
+        }
+    }
 
     // 副作用监听 (Toast 和 跳页)
     LaunchedEffect(Unit) {
@@ -55,7 +74,7 @@ fun BookshelfScreen(
                     launch { snackbarHostState.showSnackbar(effect.message) }
                 }
                 is BookshelfUiEffect.NavigateToReader -> {
-                    onNavigateToReader(ReaderRoute(
+                    onNavigateToReader(ReaderGraph.Reader(
                         bookUrl = effect.bookUrl,
                         chapterIndex = -1, // 传入 -1 让它自主查库
                         chapterTitle = "", // 书架进入时，具体章节标题可以暂时为空
@@ -178,9 +197,16 @@ fun BookshelfScreen(
 
 // 💡 书架页末尾的选项弹窗
     if (showExportOptionDialog) {
-        ExportOptionDialog(viewModel = viewModel){
-            showExportOptionDialog = false
-        }
+        ExportOptionDialog(
+            onExport = { onlyCached, concurrencyLimit, delayMs ->
+                showExportOptionDialog = false
+                pendingOnlyCached = onlyCached
+                pendingConcurrencyLimit = concurrencyLimit
+                pendingDelayMs = delayMs
+                exportDirectoryAction.chooseDirectory()
+            },
+            onDismiss = { showExportOptionDialog = false }
+        )
     }
 
     // 💡 进度条大弹窗
@@ -234,15 +260,15 @@ private fun ExportAlertDialog(
 
 @Composable
 private fun ExportOptionDialog(
-    viewModel: BookshelfViewModel,
-    hideExportOptionDialog: () -> Unit
+    onExport: (onlyCached: Boolean, concurrencyLimit: Int, delayMs: Long) -> Unit,
+    onDismiss: () -> Unit
 ) {
     // 本地临时状态，用于记录用户选中的配置
     var concurrencyLimit by remember { mutableStateOf(4) }
     var delayMs by remember { mutableStateOf(0L) }
 
     AlertDialog(
-        onDismissRequest = { hideExportOptionDialog() },
+        onDismissRequest = onDismiss,
         title = { Text("导出选项配置", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -280,13 +306,7 @@ private fun ExportOptionDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    hideExportOptionDialog()
-                    // 💡 全本下载导出：传入限流参数！
-                    viewModel.processIntent(BookshelfUiIntent.ExportSelectedBooks(
-                        onlyCached = false,
-                        concurrencyLimit = concurrencyLimit,
-                        delayMs = delayMs
-                    ))
+                    onExport(false, concurrencyLimit, delayMs)
                 }
             ) {
                 Text("导出所有章节")
@@ -295,13 +315,7 @@ private fun ExportOptionDialog(
         dismissButton = {
             OutlinedButton(
                 onClick = {
-                    hideExportOptionDialog()
-                    // 💡 仅缓存导出：由于不走网络，并发数和延迟直接给默认值即可
-                    viewModel.processIntent(BookshelfUiIntent.ExportSelectedBooks(
-                        onlyCached = true,
-                        concurrencyLimit = 4,
-                        delayMs = 0L
-                    ))
+                    onExport(true, 4, 0L)
                 }
             ) {
                 Text("仅导出已缓存章节")

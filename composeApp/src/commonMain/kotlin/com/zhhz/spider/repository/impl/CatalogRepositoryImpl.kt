@@ -7,6 +7,7 @@ import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.model.CrawlerStage
 import com.zhhz.spider.network.Chapter
 import com.zhhz.spider.network.FetchTaskRunner
+import com.zhhz.spider.network.hasLegacyInvalidTitle
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.SessionRepository
@@ -54,21 +55,27 @@ class CatalogRepositoryImpl(
             val localChapters = chapterDao.getChaptersByBookUrl(bookUrl)
 
             // 映射为统一的 ChapterBean 业务对象
-            localChapters.map { entity ->
+            val chapters = localChapters.map { entity ->
                 entity.toDomain()
             }
+            if (chapters.any(Chapter::hasLegacyInvalidTitle)) emptyList() else chapters
         }
     }
 
     override suspend fun saveData(bookUrl: String, chapters: List<Chapter>) {
         withContext(Dispatchers.IO) {
-            // 1. 毫秒级查出本地已有的章节数量 N
-            val localCount = chapterDao.getChaptersCount(bookUrl)
+            val localChapters = chapterDao.getChaptersByBookUrl(bookUrl)
+            val localCount = localChapters.size
             val fetchedCount = chapters.size
+            val existingPrefixMatches = localCount <= fetchedCount && localChapters.indices.all { index ->
+                val local = localChapters[index]
+                val fetched = chapters[index]
+                local.title == fetched.title && local.url == fetched.url
+            }
 
             when {
                 // 💡 算法 A：网络章节数大于本地。说明有新章节，我们只增量追加本地没有的部分！
-                fetchedCount > localCount -> {
+                fetchedCount > localCount && existingPrefixMatches -> {
                     // 截取第 N 到 M-1 章（只拿新出的章节）
                     val newChapters = chapters.subList(localCount, fetchedCount)
 
@@ -89,7 +96,7 @@ class CatalogRepositoryImpl(
 
                 // 💡 算法 B：网络和本地章节数完全一致。说明没更新，直接返回！
                 // 💡 0次磁盘写入，完美保护手机闪存寿命！
-                fetchedCount == localCount -> {
+                fetchedCount == localCount && existingPrefixMatches -> {
                     println("Incremental Sync: 目录无变动，无需写入数据库")
                 }
 
@@ -97,16 +104,18 @@ class CatalogRepositoryImpl(
                 // 此时执行保底容错，清空本地，重新全量对齐
                 else -> {
                     chapterDao.deleteChaptersByBookUrl(bookUrl) // 删
+                    val readStateByIndex = localChapters.associate { it.indexNum to it.isRead }
                     val entities = chapters.mapIndexed { index, bean ->
                         ChapterEntity(
                             bookUrl = bookUrl,
                             title = bean.title,
                             url = bean.url,
-                            indexNum = index
+                            indexNum = index,
+                            isRead = readStateByIndex[index] ?: false
                         )
                     }
-                    chapterDao.insertChapters(entities) // 插
-                    println("Incremental Sync: 警告！网络章节数变少，已执行全量重组覆盖。")
+                    chapterDao.saveCatalog(bookUrl, entities)
+                    println("Incremental Sync: 目录内容发生变化，已执行全量对齐。")
                 }
             }
         }

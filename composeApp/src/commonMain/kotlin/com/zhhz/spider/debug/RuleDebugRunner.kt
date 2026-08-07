@@ -12,18 +12,22 @@ import com.zhhz.spider.rule.SourceRule
 import com.zhhz.spider.rule.VariableContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class LocalDebugResult(
     val output: String,
     val traces: List<ParseTraceEvent>
 )
 
+@Serializable
 data class NetworkDebugResult(
     val html: String,
     val localResult: LocalDebugResult,
     val isError: Boolean
 )
 
+@Serializable
 data class DebugPageUpdate(
     val tabIndex: Int,
     val message: String,
@@ -31,6 +35,7 @@ data class DebugPageUpdate(
     val localResult: LocalDebugResult? = null
 )
 
+@Serializable
 data class FullChainDebugResult(
     val success: Boolean,
     val context: VariableContext,

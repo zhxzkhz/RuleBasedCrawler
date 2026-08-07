@@ -9,6 +9,7 @@ import com.zhhz.spider.manager.RuleManager
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.network.FileSnapshotInterceptor
 import com.zhhz.spider.network.HttpFetcher
+import com.zhhz.spider.network.MangaCallFactory
 import com.zhhz.spider.repository.*
 import com.zhhz.spider.repository.impl.*
 import com.zhhz.spider.util.BookPackager
@@ -51,6 +52,7 @@ val commonModule = module {
     singleOf(::RuleManager)
     singleOf(::BookSessionManager)
     singleOf(::HttpFetcher)
+    singleOf(::MangaCallFactory)
     singleOf(::FetchTaskRunner)
     singleOf(::DownloadManager)
 

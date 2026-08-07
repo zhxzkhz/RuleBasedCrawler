@@ -2,27 +2,25 @@ package com.zhhz.spider.ui.screen
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zhhz.spider.constant.BookType
 import com.zhhz.spider.ui.widget.LoadingBox
@@ -45,15 +43,11 @@ fun ReaderScreen(
     chapterIndex: Int,
     ruleId: String,
     viewModel: ReaderViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToCatalog: (String, String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-
-
-    // 💡 1. 声明抽屉状态和协程（控制目录侧滑菜单的开合）
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(chapterIndex, ruleId) {
         viewModel.processIntent(ReaderUiIntent.Init(bookUrl, chapterIndex, ruleId))
@@ -64,6 +58,7 @@ fun ReaderScreen(
         viewModel.uiEffect.collect { effect ->
             when (effect) {
                 is ReaderUiEffect.NavigateBack -> onNavigateBack()
+                is ReaderUiEffect.NavigateToCatalogPage -> onNavigateToCatalog(effect.bookUrl, effect.ruleId)
                 is ReaderUiEffect.ShowToast -> {
                     snackbarHostState.currentSnackbarData?.dismiss()
                     launch { snackbarHostState.showSnackbar(effect.message) }
@@ -72,131 +67,158 @@ fun ReaderScreen(
         }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        // 💡 极致细节：只有当菜单呼出时，才允许手势划出目录。防止用户看漫画左滑时不小心把目录拉出来
-        gesturesEnabled = uiState.isMenuVisible,
-        drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.width(300.dp) // 控制侧边目录的宽度
-            ) {
-                // 目录头部
-                Text(
-                    text = "目录 (${uiState.catalogList.size} 章)",
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+    Scaffold(
+        topBar = {
+            if (uiState.isMenuVisible) {
+                ReaderTopBar(
+                    title = uiState.title,
+                    subtitle = chapterProgressText(uiState.currentIndex, uiState.catalogList.size),
+                    onBack = { viewModel.processIntent(ReaderUiIntent.NavigateBack) }
                 )
-                HorizontalDivider()
-
-                val catalogListState = rememberLazyListState()
-
-                // 💡 自动寻路黑科技：每次打开抽屉，自动滚动到当前阅读的章节，并让它显示在屏幕中间偏上！
-                LaunchedEffect(drawerState.isOpen, uiState.currentIndex) {
-                    if (drawerState.isOpen && uiState.currentIndex >= 0) {
-                        catalogListState.scrollToItem(maxOf(0, uiState.currentIndex - 3))
+            }
+        },
+        bottomBar = {
+            if (uiState.isMenuVisible) {
+                ReaderBottomBar(
+                    hasPrev = uiState.hasPrev,
+                    hasNext = uiState.hasNext,
+                    currentIndex = uiState.currentIndex,
+                    totalChapters = uiState.catalogList.size,
+                    onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) },
+                    onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
+                    onOpenCatalogPage = {
+                        viewModel.processIntent(ReaderUiIntent.NavigateToCatalog)
+                    },
+                    onOpenSettings = {
+                        viewModel.processIntent(ReaderUiIntent.ToggleSettingsPanel)
+                    },
+                    showReloadChapter = uiState.bookType == BookType.image,
+                    onReloadChapter = {
+                        viewModel.processIntent(ReaderUiIntent.ReloadCurrentMangaChapter)
                     }
-                }
-
-                // 目录列表渲染
-                LazyColumn(state = catalogListState, modifier = Modifier.fillMaxSize()) {
-                    itemsIndexed(uiState.catalogList) { index, chapter ->
-                        val isSelected = index == uiState.currentIndex
-
-                        TextButton(
-                            onClick = {
-                                // 💡 选中章节：关闭抽屉，发射意图让 ViewModel 去换章！
-                                scope.launch { drawerState.close() }
-                                viewModel.processIntent(ReaderUiIntent.ChangeChapter(index))
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
-                            shape = MaterialTheme.shapes.small,
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-                            )
-                        ) {
-                            Text(
-                                text = chapter.title,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
+                )
+            } else if (uiState.isSettingsVisible) {
+                ReaderSettingsPanel(
+                    settings = uiState.settings,
+                    onFontSizeChange = { delta -> viewModel.processIntent(ReaderUiIntent.ChangeFontSize(delta)) },
+                    onChangeTheme = { bg, text -> viewModel.processIntent(ReaderUiIntent.ChangeTheme(bg, text)) },
+                    onToggleImmersive = { viewModel.processIntent(ReaderUiIntent.ToggleImmersiveMode) }
+                )
             }
         }
-    ) {
-        // 根据状态控制菜单显示
-        Scaffold(
-            topBar = {
-                if (uiState.isMenuVisible) {
-                    ReaderTopBar(
-                        title = uiState.title,
-                        onBack = { viewModel.processIntent(ReaderUiIntent.NavigateBack) }
-                    )
-                }
-            },
-            bottomBar = {
-                if (uiState.isMenuVisible) {
-                    ReaderBottomBar(
-                        hasPrev = uiState.hasPrev,
-                        hasNext = uiState.hasNext,
-                        onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) },
-                        onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
-                        onOpenCatalog = {
-                            // 💡 唤起左侧抽屉目录！
-                            scope.launch { drawerState.open() }
-                        }
-                    )
-                }
-            }
-        ) { padding ->
-            Box(modifier = Modifier.fillMaxSize()) {
-                if (uiState.isLoading) {
-                    // 统一的加载占位
-                    LoadingBox(Modifier.align(Alignment.Center))
-                } else {
-                    // 💡 之前提到的逻辑分发：根据书本类型渲染不同视图
-                    when (uiState.bookType) {
-                        BookType.text -> {
-                            NovelReaderView(
-                                uiState = uiState,
-                                onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
-                                onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
-                                onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }
-                            )
-                        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            if (uiState.isLoading) {
+                LoadingBox(Modifier.align(Alignment.Center))
+            } else {
+                when (uiState.bookType) {
+                    BookType.text -> {
+                        NovelReaderView(
+                            uiState = uiState,
+                            onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
+                            onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
+                            onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }
+                        )
+                    }
 
-                        BookType.image -> {
-                            MangaReaderView(
-                                ruleId = ruleId,
-                                uiState = uiState,
-                                onProgressUpdate = { index, progress ->
-                                    viewModel.processIntent(ReaderUiIntent.UpdateReadProgress(index, progress))
-                                },
-                                onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
-                                onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
-                                onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }
-                            )
-                        }
+                    BookType.image -> {
+                        MangaReaderView(
+                            ruleId = ruleId,
+                            uiState = uiState,
+                            onProgressUpdate = { index, progress ->
+                                viewModel.processIntent(ReaderUiIntent.UpdateReadProgress(index, progress))
+                            },
+                            onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
+                            onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
+                            onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }
+                        )
                     }
                 }
             }
         }
     }
+}
 
+@Composable
+fun ReaderSettingsPanel(
+    settings: com.zhhz.spider.viewModel.ReaderSettings,
+    onFontSizeChange: (Int) -> Unit,
+    onChangeTheme: (Long, Long) -> Unit,
+    onToggleImmersive: () -> Unit
+) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.9f),
+        contentColor = Color.White,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+        ) {
+            // 字号调节
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("字号", modifier = Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { onFontSizeChange(-2) }) { Text("A-", color = Color.White, fontWeight = FontWeight.Bold) }
+                    Text("${settings.fontSize}", modifier = Modifier.padding(horizontal = 16.dp))
+                    IconButton(onClick = { onFontSizeChange(2) }) { Text("A+", color = Color.White, fontWeight = FontWeight.Bold) }
+                }
+            }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
+
+            // 背景主题
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceAround
+            ) {
+                // 白昼 (默认)
+                ThemeButton(0xFFFAF7F0, 0xFF333333, "默认", settings.backgroundColor, onChangeTheme)
+                // 护眼绿
+                ThemeButton(0xFFC8E6C9, 0xFF1B5E20, "护眼", settings.backgroundColor, onChangeTheme)
+                // 夜间
+                ThemeButton(0xFF1E1E1E, 0xFFAAAAAA, "夜间", settings.backgroundColor, onChangeTheme)
+                // 羊皮纸
+                ThemeButton(0xFFF3E5AB, 0xFF5D4037, "复古", settings.backgroundColor, onChangeTheme)
+            }
+        }
+    }
+}
+
+@Composable
+fun ThemeButton(bgColor: Long, textColor: Long, label: String, currentBg: Long, onClick: (Long, Long) -> Unit) {
+    val isSelected = bgColor == currentBg
+    Button(
+        onClick = { onClick(bgColor, textColor) },
+        colors = ButtonDefaults.buttonColors(containerColor = Color(bgColor)),
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(4.dp)
+    ) {
+        Text(label, color = Color(textColor), fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+    }
 }
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReaderTopBar(title:String, onBack: () -> Unit) {
+fun ReaderTopBar(title: String, subtitle: String, onBack: () -> Unit) {
     Surface(color = Color.Black.copy(alpha = 0.8f), contentColor = Color.White) {
         TopAppBar(
-            title = { Text(text = title) },
+            title = {
+                Column {
+                    Text(text = title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (subtitle.isNotBlank()) {
+                        Text(text = subtitle, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.72f))
+                    }
+                }
+            },
             navigationIcon = { IconButton(onClick = onBack) { Icon(painterResource(Res.drawable.arrow_back_24px), null) } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
         )
@@ -208,34 +230,80 @@ fun ReaderTopBar(title:String, onBack: () -> Unit) {
 fun ReaderBottomBar(
     hasPrev: Boolean,
     hasNext: Boolean,
+    currentIndex: Int,
+    totalChapters: Int,
     onPrev: () -> Unit,
     onNext: () -> Unit,
-    onOpenCatalog: () -> Unit
+    onOpenCatalogPage: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    showReloadChapter: Boolean = false,
+    onReloadChapter: () -> Unit = {}
 ) {
+    val progress = if (totalChapters > 0) {
+        ((currentIndex + 1).coerceIn(0, totalChapters)).toFloat() / totalChapters
+    } else {
+        0f
+    }
     Surface(
         color = Color.Black.copy(alpha = 0.85f),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .windowInsetsPadding(WindowInsets.navigationBars), // 适配全面屏底部小白条
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = onPrev, enabled = hasPrev) {
-                Text("上一章", color = if (hasPrev) Color.White else Color.Gray)
-            }
+        Column {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.18f)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .windowInsetsPadding(WindowInsets.navigationBars), // 适配全面屏底部小白条
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onPrev, enabled = hasPrev) {
+                    Text("上一章", color = if (hasPrev) Color.White else Color.Gray)
+                }
 
-            // 目录唤起按钮
-            TextButton(onClick = onOpenCatalog) {
-                Text("目录", color = Color.White, style = MaterialTheme.typography.titleMedium)
-            }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    TextButton(onClick = onOpenCatalogPage) {
+                        Text("目录", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    }
+                    Text(
+                        chapterProgressText(currentIndex, totalChapters),
+                        color = Color.White.copy(alpha = 0.72f),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
 
-            TextButton(onClick = onNext, enabled = hasNext) {
-                Text("下一章", color = if (hasNext) Color.White else Color.Gray)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    TextButton(onClick = onOpenSettings) {
+                        Text("设置", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+
+                if (showReloadChapter) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        TextButton(onClick = onReloadChapter) {
+                            Text("重载本章", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                }
+
+                TextButton(onClick = onNext, enabled = hasNext) {
+                    Text("下一章", color = if (hasNext) Color.White else Color.Gray)
+                }
             }
         }
+    }
+}
+
+private fun chapterProgressText(currentIndex: Int, totalChapters: Int): String {
+    return if (totalChapters > 0 && currentIndex >= 0) {
+        "第 ${currentIndex + 1} / $totalChapters 章"
+    } else {
+        ""
     }
 }

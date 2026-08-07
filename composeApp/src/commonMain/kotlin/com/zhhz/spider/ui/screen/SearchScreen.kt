@@ -54,31 +54,41 @@ fun SearchScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            // 将 TopBar 的输入和点击事件，转化为 Intent 发送给 ViewModel
-            SearchTopBar(
-                keyword = uiState.keyword,
-                onKeywordChange = {
-                    viewModel.processIntent(SearchUiIntent.UpdateKeyword(it))
-                },
-                onSearchClick = {
-                    viewModel.processIntent(SearchUiIntent.ExecuteSearch)
-                },
-                onBackClick = onNavigateBack
-            )
-
-            // 💡 新增：利用 AnimatedVisibility 做一个平滑显示的进度条
-            AnimatedVisibility(visible = uiState.isSearchOngoing) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+                        )
+                    )
+            ) {
+                // 将 TopBar 的输入和点击事件，转化为 Intent 发送给 ViewModel
+                SearchTopBar(
+                    keyword = uiState.keyword,
+                    onKeywordChange = {
+                        viewModel.processIntent(SearchUiIntent.UpdateKeyword(it))
+                    },
+                    onSearchClick = {
+                        viewModel.processIntent(SearchUiIntent.ExecuteSearch)
+                    },
+                    onBackClick = onNavigateBack
                 )
+
+                AnimatedVisibility(visible = uiState.isSearchOngoing) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                }
             }
         }
     ) { padding ->
         Box(
             modifier = Modifier
                 .padding(padding)
+                .imePadding()
                 .fillMaxSize()
         ) {
             // 根据状态渲染不同 UI 逻辑统一

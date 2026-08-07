@@ -43,6 +43,11 @@ data class Chapter(
     val url: String     // 抓取正文用的 URL
 )
 
+// 旧 Android Rhino 曾把 Java 集合包装器序列化为该对象，供缓存迁移使用。
+fun Chapter.hasLegacyInvalidTitle(): Boolean {
+    return title.trim() == "{\"empty\":false}" || title.trim() == "{\"empty\":true}"
+}
+
 data class BookDetail(
     val url: String,
     val title: String,

@@ -45,7 +45,10 @@ fun RuleFormWithTabs(
         }
 
         Box(Modifier.fillMaxSize().padding(12.dp)) {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().imePadding(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
                 item {
                     when (selectedIndex) {
                         0 -> { // 基础信息

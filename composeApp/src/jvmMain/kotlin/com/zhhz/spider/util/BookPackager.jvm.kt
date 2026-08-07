@@ -46,14 +46,14 @@ actual class BookPackager(
 
     actual suspend fun packageBookToZip(
         bookUrl: String,
-        destinationZipPath: String,
+        destinationDirectory: String,
         onlyCached: Boolean,
         concurrencyLimit: Int,
         delayMs: Long,
         onProgress: suspend (current: Int, total: Int) -> Unit
     ): Boolean {
         val customDispatcher = Dispatchers.IO.limitedParallelism(concurrencyLimit)
-        val zipFile = File(destinationZipPath)
+        var zipFile: File? = null
 
         return withContext(Dispatchers.IO) {
             try {
@@ -63,12 +63,14 @@ actual class BookPackager(
                 val rule = ruleRepository.getEnabledRules().find { it.id == localBook.ruleId }
                 val diskCache = imageLoader.diskCache
                 if (rule == null || diskCache == null) return@withContext false
+                val safeTitle = localBook.title.replace(Regex("[\\/:*?\"<>|]"), "_").ifBlank { "manga" }
+                zipFile = File(destinationDirectory, "$safeTitle.zip")
 
                 val isMangaMode = true // 💡 TODO: 根据 rule.type == BookType.image 判定
                 val totalChapters = localChapters.size
 
                 coroutineScope {
-                    ZipOutputStream(FileOutputStream(zipFile)).use { zipOut ->
+                    ZipOutputStream(FileOutputStream(zipFile!!)).use { zipOut ->
 
                         val bookJsonStr = Json.encodeToString(localBook)
                         writeZipEntry(zipOut, "book.json", bookJsonStr.toByteArray(Charsets.UTF_8))
@@ -167,12 +169,12 @@ actual class BookPackager(
                 }
                 true
             } catch (e: CancellationException) {
-                if (zipFile.exists()) zipFile.delete()
+                zipFile?.takeIf { it.exists() }?.delete()
                 throw e
             } catch (e: Exception) {
                 logger.error { "书籍打包导出发生严重错误: ${e.message}" }
                 e.printStackTrace()
-                if (zipFile.exists()) zipFile.delete()
+                zipFile?.takeIf { it.exists() }?.delete()
                 false
             }
         }

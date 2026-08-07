@@ -3,6 +3,7 @@ package com.zhhz.spider.di
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.zhhz.spider.db.AppDatabase
+import com.zhhz.spider.remote.AndroidRuleEditorServer
 import com.zhhz.spider.util.BookPackager
 import okio.Path.Companion.toOkioPath
 import org.koin.android.ext.koin.androidContext
@@ -41,5 +42,6 @@ actual val platformModule = module {
     }
 
     singleOf(::BookPackager)
+    singleOf(::AndroidRuleEditorServer)
 
 }

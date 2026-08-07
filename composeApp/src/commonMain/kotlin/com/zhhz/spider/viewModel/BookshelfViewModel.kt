@@ -55,7 +55,12 @@ class BookshelfViewModel(
                 viewModelScope.launch { downloadManager.pauseDownload(intent.bookUrl) }
             }
 
-            is BookshelfUiIntent.ExportSelectedBooks -> handleExportSelectedBooks(intent.onlyCached, intent.concurrencyLimit, intent.delayMs)
+            is BookshelfUiIntent.ExportSelectedBooks -> handleExportSelectedBooks(
+                intent.destinationDirectory,
+                intent.onlyCached,
+                intent.concurrencyLimit,
+                intent.delayMs
+            )
 
             is BookshelfUiIntent.CancelExport -> {
                 // 💡 掐断打包协程！底层 .use 块会自动释放文件，catch 块会自动删除临时 zip
@@ -210,7 +215,12 @@ class BookshelfViewModel(
     }
 
     // 💡 核心实现：批量导出为 ZIP 包
-    private fun handleExportSelectedBooks(onlyCached: Boolean, concurrencyLimit: Int, delayMs: Long) {
+    private fun handleExportSelectedBooks(
+        destinationDirectory: String,
+        onlyCached: Boolean,
+        concurrencyLimit: Int,
+        delayMs: Long
+    ) {
         val state = uiState.value
         val selectedUrls = state.selectedBooks
         if (selectedUrls.isEmpty()) return
@@ -218,16 +228,11 @@ class BookshelfViewModel(
         // 💡 捕获 Job 引用
         exportJob = viewModelScope.launch {
             try {
-                val userHome = System.getProperty("user.home") ?: ""
-                val desktopPath = "$userHome/Desktop"
                 var successCount = 0
 
                 selectedUrls.forEach { url ->
                     val book = state.books.find { it.url == url }
                     if (book != null) {
-                        val safeTitle = book.title.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-                        val destinationZipPath = "$desktopPath/$safeTitle.zip"
-
                         updateState {
                             copy(
                                 isExporting = true,
@@ -240,7 +245,7 @@ class BookshelfViewModel(
                         // 💡 传入限制参数执行
                         val success = bookPackager.packageBookToZip(
                             bookUrl = book.url,
-                            destinationZipPath = destinationZipPath,
+                            destinationDirectory = destinationDirectory,
                             onlyCached = onlyCached,
                             concurrencyLimit = concurrencyLimit,
                             delayMs = delayMs
@@ -257,7 +262,7 @@ class BookshelfViewModel(
                 }
 
                 updateState { copy(isExporting = false, isSelectionMode = false, selectedBooks = emptySet()) }
-                sendEffect(BookshelfUiEffect.ShowToast("成功将 $successCount 本书打包导出至桌面！"))
+                sendEffect(BookshelfUiEffect.ShowToast("成功导出 $successCount 本漫画 ZIP"))
 
             } catch (e: Exception) {
                 updateState { copy(isExporting = false) }
@@ -325,7 +330,8 @@ sealed class BookshelfUiIntent : UiIntent {
     data object DownloadSelectedBooks : BookshelfUiIntent()
 
     // 💡 新增：批量将选中书籍打包导出为 ZIP 的意图
-    data class ExportSelectedBooks(val onlyCached: Boolean,
+    data class ExportSelectedBooks(val destinationDirectory: String,
+                                   val onlyCached: Boolean,
                                    val concurrencyLimit: Int,
                                    val delayMs: Long) : BookshelfUiIntent()
 

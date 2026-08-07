@@ -7,7 +7,7 @@ package com.zhhz.spider.util
 expect class BookPackager {
     suspend fun packageBookToZip(
         bookUrl: String,
-        destinationZipPath: String,
+        destinationDirectory: String,
         onlyCached: Boolean, // 💡 新增：是否只导出已缓存的章节
         concurrencyLimit: Int, // 接收动态并发限制数
         delayMs: Long,         // 接收动态延迟毫秒数

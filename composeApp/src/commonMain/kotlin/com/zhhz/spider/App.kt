@@ -17,6 +17,10 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navigation
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.navigation.toRoute
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
@@ -40,6 +44,7 @@ import com.zhhz.spider.viewModel.BookshelfViewModel
 import com.zhhz.spider.viewModel.DetailViewModel
 import com.zhhz.spider.viewModel.ReaderViewModel
 import com.zhhz.spider.viewModel.SearchViewModel
+import com.zhhz.spider.viewModel.ReaderUiIntent
 import okio.FileSystem
 import okio.Path
 import org.jetbrains.compose.resources.painterResource
@@ -79,6 +84,7 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
         val ruleRepository = koinInject<RuleRepository>()
         val sessionRepository = koinInject<SessionRepository>()
         val contextSessionManager = koinInject< ContextSessionManager>()
+        AndroidRuleEditorServerEffect()
 
         val diskCache = DiskCache.Builder()
             .fileSystem(FileSystem.SYSTEM)
@@ -87,7 +93,7 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
             .build()
 
         val okHttpFactory = OkHttpNetworkFetcherFactory(
-            callFactory = MangaCallFactory(httpFetcher,ruleRepository,sessionRepository,contextSessionManager) // 👈 Koin 会自动把你的 MangaCallFactory 塞给它
+            callFactory = koinInject<MangaCallFactory>()
         )
 
         setSingletonImageLoaderFactory { context ->
@@ -174,12 +180,59 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
                             }
                         )
                     }
-                    composable<ReaderRoute> { backStackEntry ->
-                        val book = backStackEntry.toRoute<ReaderRoute>()
+                    navigation<ReaderGraph>(startDestination = ReaderGraph.Reader::class) {
+                        composable<ReaderGraph.Reader> { backStackEntry ->
+                            // 💡 核心优化 1：使用 remember 包裹从 shared view model 或上层 NavBackStackEntry 获取 ViewModel
+                            // 通过 remember 确保在同一个 Graph 下共享 ViewModel 实例
+                            val parentEntry = remember(backStackEntry) {
+                                navController.getBackStackEntry<ReaderGraph>()
+                            }
+                            val viewModel = koinViewModel<ReaderViewModel>(viewModelStoreOwner = parentEntry)
 
-                        val viewModel = koinViewModel<ReaderViewModel>()
+                            val book = backStackEntry.toRoute<ReaderGraph.Reader>()
 
-                        ReaderScreen(bookUrl = book.bookUrl, chapterIndex = book.chapterIndex, ruleId = book.ruleId, viewModel = viewModel, onNavigateBack = { navController.popBackStackSafe() })
+                            ReaderScreen(
+                                bookUrl = book.bookUrl,
+                                chapterIndex = book.chapterIndex,
+                                ruleId = book.ruleId,
+                                viewModel = viewModel,
+                                onNavigateBack = { navController.popBackStackSafe() },
+                                onNavigateToCatalog = { bookUrl, ruleId ->
+                                    navController.navigate(ReaderGraph.Catalog(bookUrl, ruleId))
+                                }
+                            )
+                        }
+
+                        // 💡 核心优化 4：添加转场动画
+                        composable<ReaderGraph.Catalog>(
+                            enterTransition = {
+                                slideInHorizontally(
+                                    initialOffsetX = { fullWidth -> fullWidth },
+                                    animationSpec = tween(300)
+                                )
+                            },
+                            exitTransition = {
+                                slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> fullWidth },
+                                    animationSpec = tween(300)
+                                )
+                            }
+                        ) { backStackEntry ->
+                            // 共享同一个 ViewModel
+                            val parentEntry = remember(backStackEntry) {
+                                navController.getBackStackEntry<ReaderGraph>()
+                            }
+                            val viewModel = koinViewModel<ReaderViewModel>(viewModelStoreOwner = parentEntry)
+
+                            CatalogScreen(
+                                viewModel = viewModel,
+                                onNavigateBack = { navController.popBackStackSafe() },
+                                onChapterSelected = { index ->
+                                    viewModel.processIntent(ReaderUiIntent.ChangeChapter(index))
+                                    navController.popBackStackSafe()
+                                }
+                            )
+                        }
                     }
                 }
 

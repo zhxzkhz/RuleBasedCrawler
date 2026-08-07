@@ -1,5 +1,7 @@
 package com.zhhz.spider.util
 
+import android.net.Uri
+import android.provider.DocumentsContract
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
@@ -24,7 +26,6 @@ import okio.Path
 import org.koin.core.qualifier.named
 import org.koin.java.KoinJavaComponent
 import java.io.File
-import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -46,14 +47,15 @@ actual class BookPackager(
 
     actual suspend fun packageBookToZip(
         bookUrl: String,
-        destinationZipPath: String,
+        destinationDirectory: String,
         onlyCached: Boolean,
         concurrencyLimit: Int,
         delayMs: Long,
         onProgress: suspend (current: Int, total: Int) -> Unit
     ): Boolean {
         val customDispatcher = Dispatchers.IO.limitedParallelism(concurrencyLimit)
-        val zipFile = File(destinationZipPath)
+        var outputUri: Uri? = null
+        val context = platformContext
 
         return withContext(Dispatchers.IO) {
             try {
@@ -66,9 +68,24 @@ actual class BookPackager(
 
                 val isMangaMode = true // 💡 TODO: 根据 rule.type == BookType.image 判定
                 val totalChapters = localChapters.size
+                val safeTitle = localBook.title.replace(Regex("[\\/:*?\"<>|]"), "_").ifBlank { "manga" }
+                val directoryUri = Uri.parse(destinationDirectory)
+                val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    directoryUri,
+                    DocumentsContract.getTreeDocumentId(directoryUri)
+                )
+                val createdUri = DocumentsContract.createDocument(
+                    context.contentResolver,
+                    parentDocumentUri,
+                    "application/zip",
+                    "$safeTitle.zip"
+                ) ?: error("无法在所选目录创建 ZIP 文件")
+                outputUri = createdUri
+                val outputStream = context.contentResolver.openOutputStream(createdUri, "w")
+                    ?: error("无法打开 ZIP 输出流")
 
                 coroutineScope {
-                    ZipOutputStream(FileOutputStream(zipFile)).use { zipOut ->
+                    ZipOutputStream(outputStream.buffered()).use { zipOut ->
 
                         val bookJsonStr = Json.encodeToString(localBook)
                         writeZipEntry(zipOut, "book.json", bookJsonStr.toByteArray(Charsets.UTF_8))
@@ -167,12 +184,12 @@ actual class BookPackager(
                 }
                 true
             } catch (e: CancellationException) {
-                if (zipFile.exists()) zipFile.delete()
+                outputUri?.let { runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) } }
                 throw e
             } catch (e: Exception) {
                 logger.error { "书籍打包导出发生严重错误: ${e.message}" }
                 e.printStackTrace()
-                if (zipFile.exists()) zipFile.delete()
+                outputUri?.let { runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) } }
                 false
             }
         }

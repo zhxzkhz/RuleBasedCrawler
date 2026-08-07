@@ -78,6 +78,7 @@ class FetchTaskRunner(
                         logger.error { "登录失败，未获取到 token source=${source.name.ifBlank { source.id }} id=${source.id}" }
                         return "ERROR: REQUIRE_LOGIN"
                     }
+                    ctx["token"] = newToken.first
                 }
             }
         }
@@ -254,4 +255,3 @@ class FetchTaskRunner(
 }
 
 private fun IPage.pageName(): String = this::class.simpleName ?: this::class.toString()
-

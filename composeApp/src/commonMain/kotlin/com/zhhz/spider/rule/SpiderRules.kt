@@ -18,6 +18,7 @@ typealias VariableContext = MutableMap<String, String>
 /**
  * 步骤类型定义
  */
+@Serializable
 enum class StepType {
     CSS, XPATH, REGEX, JSON, TEMPLATE, SCRIPT, CONSTANT, REPLACE
 }

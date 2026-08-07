@@ -15,7 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhhz.spider.ReaderRoute
+import com.zhhz.spider.ReaderGraph
 import com.zhhz.spider.ui.widget.BookCover
 import com.zhhz.spider.ui.widget.ChapterListItem
 import com.zhhz.spider.viewModel.DetailUiEffect
@@ -34,7 +34,7 @@ fun DetailScreen(
     ruleId: String,
     viewModel: DetailViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToReader: (ReaderRoute) -> Unit
+    onNavigateToReader: (ReaderGraph.Reader) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }

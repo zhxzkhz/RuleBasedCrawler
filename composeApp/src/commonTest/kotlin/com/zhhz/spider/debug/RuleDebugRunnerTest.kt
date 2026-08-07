@@ -46,6 +46,8 @@ class RuleDebugRunnerTest {
             result.traces.map { it.selectorName }
         )
         assertTrue(result.traces.all { it.outputCount > 0 })
+        assertTrue(result.traces.all { it.inputValues.isNotEmpty() })
+        assertTrue(result.traces.all { it.outputValues.isNotEmpty() })
     }
 
     private fun css(

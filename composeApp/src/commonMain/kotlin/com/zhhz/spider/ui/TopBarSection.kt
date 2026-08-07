@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.JSONWriter
+import com.zhhz.spider.rememberRuleFileActions
 import com.zhhz.spider.rule.SourceRule
 import com.zhhz.spider.viewModel.MangaImage
 import kotlinx.coroutines.Job
@@ -65,6 +66,52 @@ fun TopBarSection(
     var isExport by remember { mutableStateOf(false) }
     var jsonStr by remember { mutableStateOf("") }
     var jsonParseError by remember { mutableStateOf<String?>(null) }
+    var fileOperationMessage by remember { mutableStateOf<String?>(null) }
+
+    fun importJson(content: String): Boolean {
+        val parsedRule = runCatching {
+            safeJson.decodeFromString<SourceRule>(content)
+        }.getOrElse { error ->
+            jsonParseError = "JSON 格式解析失败：${error.message ?: error::class.simpleName}"
+            return false
+        }
+        jsonStr = content
+        onRuleChange(parsedRule)
+        jsonParseError = null
+        return true
+    }
+
+    val fileActions = rememberRuleFileActions(
+        onOpenResult = { result ->
+            result.onSuccess { content ->
+                if (importJson(content)) {
+                    fileOperationMessage = "规则文件导入成功"
+                    showJsonDialog = false
+                } else {
+                    isExport = false
+                    showJsonDialog = true
+                }
+            }.onFailure {
+                jsonParseError = "文件读取失败：${it.message ?: it::class.simpleName}"
+                isExport = false
+                showJsonDialog = true
+            }
+        },
+        onSaveResult = { result ->
+            result.onSuccess {
+                fileOperationMessage = "规则文件导出成功"
+            }.onFailure {
+                jsonParseError = "文件保存失败：${it.message ?: it::class.simpleName}"
+                isExport = true
+                showJsonDialog = true
+            }
+        }
+    )
+    val exportFileName = remember(currentRule.id, currentRule.name) {
+        val baseName = currentRule.name.ifBlank { "rule-${currentRule.id.take(8)}" }
+            .replace(Regex("[\\/:*?\"<>|]"), "_")
+        "$baseName.json"
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth().background(Color.White)) {
         val isMobile = maxWidth < 768.dp
@@ -177,6 +224,13 @@ fun TopBarSection(
                                     }
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("从文件导入", fontSize = 13.sp) },
+                                    onClick = {
+                                        mobileMenuExpanded = false
+                                        fileActions.openJsonFile()
+                                    }
+                                )
+                                DropdownMenuItem(
                                     text = { Text("导出书源 (JSON)", fontSize = 13.sp) },
                                     onClick = {
                                         mobileMenuExpanded = false
@@ -184,6 +238,13 @@ fun TopBarSection(
                                         jsonStr = safeJson.encodeToString(currentRule)
                                         jsonParseError = null
                                         showJsonDialog = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("导出到文件", fontSize = 13.sp) },
+                                    onClick = {
+                                        mobileMenuExpanded = false
+                                        fileActions.saveJsonFile(exportFileName, safeJson.encodeToString(currentRule))
                                     }
                                 )
                                 HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
@@ -445,22 +506,29 @@ fun TopBarSection(
                     Button(onClick = { showJsonDialog = false }) { Text("关闭") }
                 },
                 dismissButton = {
-                    if (!isExport) {
-                        Button(onClick = {
-                            val parsedRule = runCatching {
-                                safeJson.decodeFromString<SourceRule>(jsonStr)
-                            }.getOrElse { error ->
-                                jsonParseError = "JSON 格式解析失败：${error.message ?: error::class.simpleName}"
-                                return@Button
-                            }
-
-                            onRuleChange(parsedRule)
-                            jsonParseError = null
-                            showJsonDialog = false
-                        }) { Text("导入") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isExport) {
+                            Button(onClick = {
+                                fileActions.saveJsonFile(exportFileName, jsonStr)
+                            }) { Text("保存到文件") }
+                        } else {
+                            OutlinedButton(onClick = { fileActions.openJsonFile() }) { Text("选择文件") }
+                            Button(onClick = {
+                                if (importJson(jsonStr)) showJsonDialog = false
+                            }) { Text("导入") }
+                        }
                     }
                 }
             )
+        }
+
+        fileOperationMessage?.let { message ->
+            Snackbar(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                action = {
+                    TextButton(onClick = { fileOperationMessage = null }) { Text("关闭") }
+                }
+            ) { Text(message) }
         }
     }
 }

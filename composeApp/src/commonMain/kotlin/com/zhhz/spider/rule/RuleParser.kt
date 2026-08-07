@@ -1,6 +1,7 @@
 package com.zhhz.spider.rule
 
 //import com.sun.script.javascript.RhinoScriptEngineFactory
+import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.JSONPath
 import com.zhhz.spider.ENGINE
 import com.zhhz.spider.util.JsExtensionClass
@@ -18,6 +19,8 @@ private val logger = KotlinLogging.logger {}
 val SCRIPT_ENGINE: ScriptEngine = ENGINE
 
 object RuleParser {
+    private const val TRACE_MAX_VALUES = 50
+    private const val TRACE_MAX_VALUE_CHARS = 200_000
 
     private val regexPatternCache = ConcurrentHashMap<String, Pattern>()
     private val replaceRegexCache = ConcurrentHashMap<String, Regex>()
@@ -88,6 +91,7 @@ object RuleParser {
                 break
             }
             val inputCount = dataList.size
+            val inputValues = snapshotTraceValues(dataList)
             dataList = try {
                 processBatch(dataList, rootData, step, ctx)
             } catch (e: Exception) {
@@ -101,7 +105,8 @@ object RuleParser {
                         inputCount = inputCount,
                         outputCount = 0,
                         status = ParseTraceStatus.ERROR,
-                        message = e.message ?: e::class.simpleName ?: "未知错误"
+                        message = e.message ?: e::class.simpleName ?: "未知错误",
+                        inputValues = inputValues
                     )
                 )
                 logger.error(e) {
@@ -118,7 +123,9 @@ object RuleParser {
                     rule = step.rule,
                     inputCount = inputCount,
                     outputCount = dataList.size,
-                    status = if (dataList.isEmpty()) ParseTraceStatus.EMPTY else ParseTraceStatus.OK
+                    status = if (dataList.isEmpty()) ParseTraceStatus.EMPTY else ParseTraceStatus.OK,
+                    inputValues = inputValues,
+                    outputValues = snapshotTraceValues(dataList)
                 )
             )
             logger.debug { "步骤 [${index + 1}] (${step.type}) 执行完毕，执行代码：${step.rule.truncate(40)}，产出数量: ${dataList.size}" }
@@ -134,6 +141,23 @@ object RuleParser {
         val result = finalResult ?: selector.defaultValue
         logger.debug { "解析最终完成，结果为空? ${finalResult == null}" }
         return result
+    }
+
+    private fun snapshotTraceValues(values: List<Any>): List<ParseTraceValue> {
+        return values.take(TRACE_MAX_VALUES).map { value ->
+            val raw = when (value) {
+                is Element -> value.outerHtml()
+                is CharSequence -> value.toString()
+                is Map<*, *>, is Iterable<*>, is Array<*> -> runCatching {
+                    JSON.toJSONString(value)
+                }.getOrElse { value.toString() }
+                else -> value.toString()
+            }
+            ParseTraceValue(
+                text = raw.take(TRACE_MAX_VALUE_CHARS),
+                truncated = raw.length > TRACE_MAX_VALUE_CHARS
+            )
+        }
     }
 
     private fun processBatch(inputs: List<Any>, root: Any, step: ParseStep, ctx: VariableContext): List<Any> {
@@ -203,6 +227,7 @@ object RuleParser {
                 bindings["value"] = item
                 bindings["data"] = item
                 bindings["root"] = root  // 【新增】根数据，JS 里可以用 root.xxx 访问原始 HTML
+
                 try {
                     JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(step.rule, bindings))
                 }  catch (e: ScriptException){
