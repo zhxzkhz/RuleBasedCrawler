@@ -86,11 +86,14 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
         val contextSessionManager = koinInject< ContextSessionManager>()
         AndroidRuleEditorServerEffect()
 
-        val diskCache = DiskCache.Builder()
-            .fileSystem(FileSystem.SYSTEM)
-            .maxSizeBytes(10 * 1024 * 1024 * 1024L) // 10GB
-            .directory(get(Path::class.java, named("imageCacheDir"))) // 💡 设进这里
-            .build()
+        // DiskCache is process-wide. Do not recreate it when App recomposes.
+        val diskCache = remember {
+            DiskCache.Builder()
+                .fileSystem(FileSystem.SYSTEM)
+                .maxSizeBytes(10 * 1024 * 1024 * 1024L) // 10GB
+                .directory(get(Path::class.java, named("imageCacheDir"))) // 💡 设进这里
+                .build()
+        }
 
         val okHttpFactory = OkHttpNetworkFetcherFactory(
             callFactory = koinInject<MangaCallFactory>()
@@ -114,6 +117,7 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
         val scope = rememberCoroutineScope()
 
         var isDebug by remember { mutableStateOf(System.getenv("isDebug").toBoolean()) }
+        var editorOpenedFromManagement by remember { mutableStateOf(false) }
         //isDebug = true
 
         val navController = rememberNavController()
@@ -122,14 +126,16 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
 
 
         if (isDebug) {
-            MainScreen(currentRule,onRuleChange = { newRule ->
-                // 3. 当子组件触发回调时，在这里更新父级状态
-                currentRule = newRule
-            },{
-                isDebug = it
-            }) {
-                currentRule = it
-            }
+            MainScreen(
+                currentRule = currentRule,
+                onRuleChange = { newRule -> currentRule = newRule },
+                onOpen = { open ->
+                    isDebug = open
+                    if (!open) editorOpenedFromManagement = false
+                },
+                onUpdate = { currentRule = it },
+                allowRuleSelection = !editorOpenedFromManagement
+            )
         } else {
 
             MaterialTheme {
@@ -146,8 +152,16 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
                             onNavigateToReader = { book ->
                                 navController.navigate(book)
                             },
-                            onOpenRule = {
-                                isDebug = it
+                            onOpenRuleManagement = { navController.navigate("rules") }
+                        )
+                    }
+                    composable("rules") {
+                        RuleManagementScreen(
+                            onNavigateBack = { navController.popBackStackSafe() },
+                            onEditRule = { rule ->
+                                currentRule = rule
+                                editorOpenedFromManagement = true
+                                isDebug = true
                             }
                         )
                     }

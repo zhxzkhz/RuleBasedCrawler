@@ -12,12 +12,12 @@ import androidx.compose.ui.unit.dp
 import com.zhhz.spider.DetailRoute
 import com.zhhz.spider.network.toDomain
 import com.zhhz.spider.ui.widget.SearchResultItem
+import com.zhhz.spider.ui.widget.SearchRuleSelector
 import com.zhhz.spider.ui.widget.SearchTopBar
 import com.zhhz.spider.viewModel.SearchUiEffect
 import com.zhhz.spider.viewModel.SearchUiIntent
 import com.zhhz.spider.viewModel.SearchViewModel
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,6 +66,7 @@ fun SearchScreen(
                 // 将 TopBar 的输入和点击事件，转化为 Intent 发送给 ViewModel
                 SearchTopBar(
                     keyword = uiState.keyword,
+                    placeholder = if (uiState.isIdSearch) "输入书籍 ID" else "搜索书名、作者...",
                     onKeywordChange = {
                         viewModel.processIntent(SearchUiIntent.UpdateKeyword(it))
                     },
@@ -73,6 +74,22 @@ fun SearchScreen(
                         viewModel.processIntent(SearchUiIntent.ExecuteSearch)
                     },
                     onBackClick = onNavigateBack
+                )
+
+                SearchRuleSelector(
+                    rules = uiState.availableRules,
+                    selectedRuleId = uiState.selectedRuleId,
+                    isPreciseSearch = uiState.isPreciseSearch,
+                    isIdSearch = uiState.isIdSearch,
+                    onRuleSelected = {
+                        viewModel.processIntent(SearchUiIntent.SelectRule(it))
+                    },
+                    onPreciseSearchChange = {
+                        viewModel.processIntent(SearchUiIntent.SetPreciseSearch(it))
+                    },
+                    onIdSearchChange = {
+                        viewModel.processIntent(SearchUiIntent.SetIdSearch(it))
+                    }
                 )
 
                 AnimatedVisibility(visible = uiState.isSearchOngoing) {
@@ -117,7 +134,7 @@ fun SearchScreen(
                         )
                     }
                 }
-            } else if (uiState.keyword.isNotBlank()) {
+            } else if (uiState.hasSearched) {
                 // 搜索结果为空的占位图
                 Text(
                     text = "暂无数据",

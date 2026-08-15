@@ -1,5 +1,8 @@
 package com.zhhz.spider.manager
 
+import com.zhhz.spider.network.Book
+import com.zhhz.spider.network.Chapter
+import com.zhhz.spider.repository.SessionRepository
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -45,5 +48,28 @@ class ContextSessionManagerTest {
         assertNull(bookContext["token"])
         bookContext["bookUrl"] = "book-a"
         assertEquals("book-a", manager.getContext("book-a")["bookUrl"])
+    }
+
+    @Test
+    fun activeContextUsesCurrentBookUrlWithoutAvailableSources() = runTest {
+        val manager = ContextSessionManager()
+        val repository = TestSessionRepository(
+            Book("book-a", "Book A", "", "", "rule-a")
+        )
+
+        val context = manager.getActiveContext(repository, "rule-a")
+        context["marker"] = "book context"
+
+        assertEquals("book context", manager.getContext("book-a")["marker"])
+        assertNull(manager.getContext("rule-a")["marker"])
+    }
+
+    private class TestSessionRepository(private var book: Book?) : SessionRepository {
+        private var catalog = emptyList<Chapter>()
+        override suspend fun saveData(book: Book) { this.book = book }
+        override fun loadData(): Book? = book
+        override fun clearData() { book = null }
+        override fun saveCatalog(chapters: List<Chapter>) { catalog = chapters }
+        override fun loadCatalog(): List<Chapter> = catalog
     }
 }

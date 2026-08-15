@@ -41,7 +41,7 @@ fun BookshelfScreen(
     viewModel: BookshelfViewModel,
     onGoToSearch: () -> Unit,
     onNavigateToReader: (ReaderGraph.Reader) -> Unit,
-    onOpenRule: (Boolean) -> Unit
+    onOpenRuleManagement: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -97,7 +97,7 @@ fun BookshelfScreen(
                 },
                 onRefresh = { viewModel.processIntent(BookshelfUiIntent.RefreshBooks) },
                 onGoToSearch = onGoToSearch,
-                onOpenRule = onOpenRule,
+                onOpenRuleManagement = onOpenRuleManagement,
             )
         },
         // 💡 多选模式下的底部操作栏
@@ -332,32 +332,61 @@ private fun BookshelfTopBar(
     onSelectAll: () -> Unit, // 全选/取消全选
     onRefresh: () -> Unit,
     onGoToSearch: () -> Unit,
-    onOpenRule: (Boolean) -> Unit
+    onOpenRuleManagement: () -> Unit
 ) {
-    if (uiState.isSelectionMode) {
-        // 💡 模式 B：多选管理模式
-        TopAppBar(
-            title = { Text("已选择 ${uiState.selectedBooks.size} 本书") },
-            navigationIcon = {
-                IconButton(onClick = onToggleSelectionMode) { Icon(painterResource(Res.drawable.close_24px), "退出管理") }
-            },
-            actions = {
-                val isAllSelected = uiState.selectedBooks.size == uiState.books.size && uiState.books.isNotEmpty()
-                TextButton(onClick = onSelectAll) { Text(if (isAllSelected) "取消全选" else "全选") }
-            }
-        )
-    } else {
-        // 💡 模式 A：正常浏览模式
-        TopAppBar(
-            title = { Text("我的书架", fontWeight = FontWeight.ExtraBold) },
-            actions = {
-                IconButton(onClick = {
-                    onOpenRule(true)
-                }) { Icon(painterResource(Res.drawable.code_blocks_24px), "编辑规则") }
-                IconButton(onClick = onRefresh) { Icon(painterResource(Res.drawable.refresh_24px), "检测更新") }
-                IconButton(onClick = onGoToSearch) { Icon(painterResource(Res.drawable.search_24px), "搜索新书") }
-            }
-        )
+    Column {
+        if (uiState.isSelectionMode) {
+            // 💡 模式 B：多选管理模式
+            TopAppBar(
+                title = { Text("已选择 ${uiState.selectedBooks.size} 本书") },
+                navigationIcon = {
+                    IconButton(onClick = onToggleSelectionMode) { Icon(painterResource(Res.drawable.close_24px), "退出管理") }
+                },
+                actions = {
+                    val isAllSelected = uiState.selectedBooks.size == uiState.books.size && uiState.books.isNotEmpty()
+                    TextButton(onClick = onSelectAll) { Text(if (isAllSelected) "取消全选" else "全选") }
+                }
+            )
+        } else {
+            // 💡 模式 A：正常浏览模式
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("我的书架", fontWeight = FontWeight.ExtraBold)
+                        if (uiState.isRefreshing) {
+                            Text(
+                                text = "正在更新 ${uiState.refreshCompletedCount}/${uiState.refreshTotalCount}：${uiState.refreshBookTitle}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenRuleManagement) {
+                        Icon(painterResource(Res.drawable.code_blocks_24px), "规则管理")
+                    }
+                    IconButton(
+                        onClick = onRefresh,
+                        enabled = !uiState.isRefreshing
+                    ) { Icon(painterResource(Res.drawable.refresh_24px), "更新章节目录") }
+                    IconButton(onClick = onGoToSearch) {
+                        Icon(painterResource(Res.drawable.search_24px), "搜索新书")
+                    }
+                }
+            )
+        }
+        if (uiState.isRefreshing) {
+            LinearProgressIndicator(
+                progress = {
+                    if (uiState.refreshTotalCount == 0) 0f
+                    else uiState.refreshCompletedCount.toFloat() / uiState.refreshTotalCount
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 

@@ -11,7 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -24,6 +23,7 @@ import rulebasedcrawler.composeapp.generated.resources.arrow_back_24px
 @Composable
 fun SearchTopBar(
     keyword: String,
+    placeholder: String = "搜索书名、作者...",
     onKeywordChange: (String) -> Unit,
     onBackClick: () -> Unit,
     onSearchClick: () -> Unit
@@ -32,7 +32,7 @@ fun SearchTopBar(
     Surface(
         modifier = Modifier.fillMaxWidth().padding(12.dp),
         shape = RoundedCornerShape(24.dp), // 圆角让它更像搜索框
-        color = Color(0xFFF5F5F5), // 浅灰色背景
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp
     ) {
         Row(
@@ -40,7 +40,11 @@ fun SearchTopBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBackClick) {
-                Icon(painterResource(Res.drawable.arrow_back_24px), "返回", tint = Color.DarkGray)
+                Icon(
+                    painterResource(Res.drawable.arrow_back_24px),
+                    "返回",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             BasicTextField(
@@ -48,9 +52,18 @@ fun SearchTopBar(
                 onValueChange = onKeywordChange,
                 modifier = Modifier.weight(1f).padding(vertical = 10.dp),
                 singleLine = true,
-                textStyle = TextStyle(fontSize = 15.sp),
+                textStyle = TextStyle(
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                ),
                 decorationBox = { inner ->
-                    if (keyword.isEmpty()) Text("搜索书名、作者...", color = Color.Gray, fontSize = 14.sp)
+                    if (keyword.isEmpty()) {
+                        Text(
+                            placeholder,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
                     inner()
                 },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),

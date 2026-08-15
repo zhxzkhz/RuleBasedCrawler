@@ -22,7 +22,7 @@ fun DetailRuleForm(detailRule: DetailPage?, highlightedSelectorName: String? = n
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             FetchConfigEditor("详情页网络配置", detailRule.config,onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(config = it)) }
-            SelectorEditor("搜索地址 (可选)", detailRule.urlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.urlSelector"), onOpenJsEditor = onOpenJsEditor) {
+            SelectorEditor("详情地址 / ID 转换（配置后支持 ID 搜索）", detailRule.urlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.urlSelector"), onOpenJsEditor = onOpenJsEditor) {
                 onUpdate(detailRule.copy(urlSelector = it))
             }
             SelectorEditor("书名", detailRule.bookNameSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.bookNameSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(bookNameSelector = it)) }

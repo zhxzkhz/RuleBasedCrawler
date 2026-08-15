@@ -41,6 +41,23 @@ class DecryptingFetcher(
     private val contextSessionManager: ContextSessionManager by inject()
 
     override suspend fun fetch(): FetchResult? {
+        val diskCacheKey = options.diskCacheKey ?: url
+
+        // 解密成品由本 Fetcher 直接写入 Coil DiskCache。优先直读该快照，避免网络
+        // delegate 因缺少自己的响应元数据而重新下载导出阶段已经缓存的图片。
+        if (diskCache != null && options.diskCachePolicy.readEnabled) {
+            diskCache.openSnapshot(diskCacheKey)?.let { snapshot ->
+                return SourceFetchResult(
+                    source = ImageSource(
+                        file = snapshot.data,
+                        fileSystem = options.fileSystem,
+                        diskCacheKey = diskCacheKey
+                    ),
+                    mimeType = null,
+                    dataSource = DataSource.DISK
+                )
+            }
+        }
 
         // 拿到原始混淆流
         val result = delegate.fetch() // 💡 传入只读选项
@@ -53,26 +70,25 @@ class DecryptingFetcher(
 
             val scrambledBytes = result.source.source().readByteArray()
 
-            val bitmap = scrambledBytes.toCoilBitmap()
-            val bindings = SimpleBindings()
+            // Decoding and descrambling several full-resolution pages concurrently causes large
+            // allocation spikes and GC pauses. Network downloads can remain concurrent, but only
+            // one page holds the source and output bitmaps during this CPU-heavy stage.
             val ctx = contextSessionManager.getContext(bookUrl, ruleId)
-            bindings.put("java", JsExtensionClass)
-            bindings.put("java_ctx", ctx)
-            bindings.put("java_url", url)
-            bindings.put("java_log", logger)
-            bindings.put("bitmap", bitmap)
+            val cleanBytes = synchronized(jvmDecryptLock) {
+                val bitmap = scrambledBytes.toCoilBitmap()
+                val bindings = SimpleBindings()
+                bindings.put("java", JsExtensionClass)
+                bindings.put("java_ctx", ctx)
+                bindings.put("java_url", url)
+                bindings.put("java_log", logger)
+                bindings.put("bitmap", bitmap)
 
-            // 2. 内存解密拼图还原
-            val decryptRule = rule.content.decryptImage
-            //val cleanBytes = MangaDescrambler.descrambleAndEncode(rule,scrambledBytes, decryptRule, bindings)
-            //val detectedFormat = ImageFormatDetector.detectFormat(scrambledBytes)
-            val detectedFormat = ImageFormatDetector.detectFormat(scrambledBytes)
-
-            val cleanBytes = bitmap.descrambleAndEncode(decryptRule, detectedFormat, bindings) ?: scrambledBytes
+                val decryptRule = rule.content.decryptImage
+                val detectedFormat = ImageFormatDetector.detectFormat(scrambledBytes)
+                bitmap.descrambleAndEncode(decryptRule, detectedFormat, bindings) ?: scrambledBytes
+            }
 
             // 💡 4. 【核心大招】：由我们自己接管写盘，并强行向 journal 注册！
-
-            val diskCacheKey = options.diskCacheKey ?: url
 
             // 如果磁盘缓存可用，且本次请求允许写入
             if (diskCache != null && options.diskCachePolicy.writeEnabled) {

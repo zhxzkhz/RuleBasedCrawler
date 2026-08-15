@@ -51,7 +51,7 @@ fun TopBarSection(
     onInputChange: (String) -> Unit,
     currentRule: SourceRule,
     onRuleChange: (SourceRule) -> Unit,
-    onShowSelectDialogChange: () -> Unit,
+    onShowSelectDialogChange: (() -> Unit)?,
     onOpen: (Boolean) -> Unit,
     onLocalTest: () -> Unit,
     onNetworkFetch: () -> Unit,
@@ -209,10 +209,12 @@ fun TopBarSection(
                                 expanded = mobileMenuExpanded,
                                 onDismissRequest = { mobileMenuExpanded = false }
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("重选书源", fontSize = 13.sp) },
-                                    onClick = { mobileMenuExpanded = false; onShowSelectDialogChange() }
-                                )
+                                if (onShowSelectDialogChange != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("重选书源", fontSize = 13.sp) },
+                                        onClick = { mobileMenuExpanded = false; onShowSelectDialogChange() }
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = { Text("导入书源 (JSON)", fontSize = 13.sp) },
                                     onClick = {
@@ -389,42 +391,14 @@ fun TopBarSection(
                     }
                 )
 
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(8.dp))
 
-                OutlinedButton(onClick = { onOpen(false) }) { Text("关闭") }
-
-                Spacer(Modifier.width(12.dp))
-
-                OutlinedButton(onClick = {
-                    isExport = false
-                    jsonStr = ""
-                    jsonParseError = null
-                    showJsonDialog = true
-                }) { Text("导入") }
-
-                Spacer(Modifier.width(12.dp))
-
-                OutlinedButton(onClick = {
-                    isExport = true
-                    // 💡 彻底清除 Fastjson 序列化，全盘改用干净、全平台兼容的 safeJson！
-                    jsonStr = safeJson.encodeToString(currentRule)
-                    jsonParseError = null
-                    showJsonDialog = true
-                }) { Text("导出") }
-
-                Spacer(Modifier.width(12.dp))
-
-                OutlinedButton(onClick = { onSave() }) { Text("保存") }
-
-                Spacer(Modifier.width(12.dp))
-
-                OutlinedButton(onClick = { onShowSelectDialogChange() }) { Text("重选") }
-
-                Spacer(Modifier.width(12.dp))
-
-                // --- 核心重构：组合式运行选择器 ---
+                // 运行控件和输入框属于同一操作组，必须紧邻显示。
                 Row(
-                    modifier = Modifier.height(32.dp).border(1.dp, Color.LightGray, RoundedCornerShape(4.dp)),
+                    modifier = Modifier
+                        .height(32.dp)
+                        .background(currentMode.color.copy(alpha = 0.06f), RoundedCornerShape(4.dp))
+                        .border(1.dp, currentMode.color.copy(alpha = 0.35f), RoundedCornerShape(4.dp)),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // 1. 模式选择下拉框
@@ -432,10 +406,15 @@ fun TopBarSection(
                         TextButton(
                             onClick = { menuExpanded = true },
                             modifier = Modifier.height(32.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                         ) {
-                            Text(currentMode.label, fontSize = 12.sp, color = Color.DarkGray)
-                            Text(" ▾", fontSize = 12.sp, color = Color.Gray)
+                            Text(
+                                currentMode.label,
+                                fontSize = 12.sp,
+                                color = currentMode.color,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(" ▾", fontSize = 12.sp, color = currentMode.color)
                         }
 
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
@@ -452,7 +431,7 @@ fun TopBarSection(
                     }
 
                     // 2. 垂直分割线
-                    Box(Modifier.width(1.dp).height(20.dp).background(Color.LightGray))
+                    Box(Modifier.width(1.dp).height(20.dp).background(currentMode.color.copy(alpha = 0.25f)))
 
                     // 3. 统一的执行按钮 (Play 键)
                     IconButton(
@@ -472,6 +451,38 @@ fun TopBarSection(
                             modifier = Modifier.size(18.dp)
                         )
                     }
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                OutlinedButton(onClick = { onOpen(false) }) { Text("关闭") }
+
+                Spacer(Modifier.width(8.dp))
+
+                OutlinedButton(onClick = {
+                    isExport = false
+                    jsonStr = ""
+                    jsonParseError = null
+                    showJsonDialog = true
+                }) { Text("导入") }
+
+                Spacer(Modifier.width(8.dp))
+
+                OutlinedButton(onClick = {
+                    isExport = true
+                    // 💡 彻底清除 Fastjson 序列化，全盘改用干净、全平台兼容的 safeJson！
+                    jsonStr = safeJson.encodeToString(currentRule)
+                    jsonParseError = null
+                    showJsonDialog = true
+                }) { Text("导出") }
+
+                Spacer(Modifier.width(8.dp))
+
+                OutlinedButton(onClick = { onSave() }) { Text("保存") }
+
+                if (onShowSelectDialogChange != null) {
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = onShowSelectDialogChange) { Text("重选") }
                 }
             }
         }

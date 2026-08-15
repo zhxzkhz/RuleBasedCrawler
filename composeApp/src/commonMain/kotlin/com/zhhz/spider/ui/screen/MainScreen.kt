@@ -62,7 +62,13 @@ import kotlinx.coroutines.yield
 import org.koin.compose.koinInject
 
 @Composable
-fun MainScreen(currentRule: SourceRule, onRuleChange: (SourceRule) -> Unit, onOpen: (Boolean) -> Unit, onUpdate: (SourceRule) -> Unit) {
+fun MainScreen(
+    currentRule: SourceRule,
+    onRuleChange: (SourceRule) -> Unit,
+    onOpen: (Boolean) -> Unit,
+    onUpdate: (SourceRule) -> Unit,
+    allowRuleSelection: Boolean = true
+) {
     val taskRunner = koinInject<FetchTaskRunner>()
 
     MaterialTheme {
@@ -178,7 +184,8 @@ fun MainScreen(currentRule: SourceRule, onRuleChange: (SourceRule) -> Unit, onOp
                 try {
                     val client = remoteClient
                     if (client == null) {
-                        dao.saveRule(currentRule.toEntity())
+                        val wasEnabled = dao.getRuleById(currentRule.id)?.isEnabled ?: true
+                        dao.saveRule(currentRule.toEntity(isEnabled = wasEnabled))
                         DebugLogBuffer.append("√ 规则 [${currentRule.name}] 已保存到本地数据库")
                     } else {
                         val response = client.save(RemoteRuleRequest(currentRule))
@@ -201,8 +208,8 @@ fun MainScreen(currentRule: SourceRule, onRuleChange: (SourceRule) -> Unit, onOp
         val localRules by ruleDao.getAllRulesFlow().collectAsState(initial = emptyList())
         val savedRules = if (remoteClient == null) localRules else remoteRules
 
-        LaunchedEffect(Unit) {
-            showSelectDialog = true
+        LaunchedEffect(allowRuleSelection) {
+            if (allowRuleSelection) showSelectDialog = true
         }
 
         var activeEditContext by remember { mutableStateOf<JsEditContext?>(null) }
@@ -232,7 +239,9 @@ fun MainScreen(currentRule: SourceRule, onRuleChange: (SourceRule) -> Unit, onOp
                     currentRule = currentRule,
                     onOpen = onOpen,
                     onRuleChange = onRuleChange,
-                    onShowSelectDialogChange = { showSelectDialog = true },
+                    onShowSelectDialogChange = if (allowRuleSelection) {
+                        { showSelectDialog = true }
+                    } else null,
                     onInputChange = { topInputText = it },
                     onLocalTest = {
                         val currentTab = selectedTabIndex

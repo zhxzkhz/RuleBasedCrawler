@@ -11,6 +11,10 @@ class BookSessionManager {
     private var _currentCatalog: List<Chapter> = emptyList()
 
     fun setCurrentBook(book: Book) {
+        val previous = _currentSearchBook
+        if (previous?.url != book.url || previous.ruleId != book.ruleId) {
+            _currentCatalog = emptyList()
+        }
         _currentSearchBook = book
     }
 
@@ -28,5 +32,6 @@ class BookSessionManager {
 
     fun clear() {
         _currentSearchBook = null
+        _currentCatalog = emptyList()
     }
 }

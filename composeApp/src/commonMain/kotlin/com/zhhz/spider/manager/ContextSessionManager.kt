@@ -70,6 +70,11 @@ class ContextSessionManager(private val maxEntries: Int = 50) {
 }
 
 suspend fun ContextSessionManager.getActiveContext(sessionRepository: SessionRepository,ruleId: String): VariableContext {
-    val currentBookUrl = sessionRepository.loadData()?.availableSources?.find { it.ruleId == ruleId } ?.url ?: ruleId
+    val currentBook = sessionRepository.loadData()
+    val currentBookUrl = currentBook?.availableSources
+        ?.find { it.ruleId == ruleId }
+        ?.url
+        ?: currentBook?.url
+        ?: ruleId
     return this.getContext(currentBookUrl)
 }

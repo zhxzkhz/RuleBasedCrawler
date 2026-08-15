@@ -6,6 +6,8 @@ import com.zhhz.spider.manager.DownloadManager
 import com.zhhz.spider.model.DownloadTask
 import com.zhhz.spider.network.Book
 import com.zhhz.spider.repository.BookRepository
+import com.zhhz.spider.repository.CatalogRepository
+import com.zhhz.spider.repository.DetailRepository
 import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.ui.base.BaseViewModel
 import com.zhhz.spider.ui.base.UiEffect
@@ -13,13 +15,20 @@ import com.zhhz.spider.ui.base.UiIntent
 import com.zhhz.spider.ui.base.UiState
 import com.zhhz.spider.util.BookPackager
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlin.coroutines.cancellation.CancellationException
 
 class BookshelfViewModel(
     private val repository: BookRepository, // 后续建议替换为 BookRepository
     private val sessionRepository: SessionRepository,
+    private val detailRepository: DetailRepository,
+    private val catalogRepository: CatalogRepository,
     private val downloadManager: DownloadManager,
     private val bookPackager: BookPackager
 ) : BaseViewModel<BookshelfUiState, BookshelfUiIntent, BookshelfUiEffect>(
@@ -39,6 +48,7 @@ class BookshelfViewModel(
     }
 
     private var exportJob: Job? = null
+    private var refreshJob: Job? = null
 
     override fun handleIntent(intent: BookshelfUiIntent) {
         when (intent) {
@@ -71,7 +81,7 @@ class BookshelfViewModel(
 
             is BookshelfUiIntent.DownloadSelectedBooks -> handleDownloadSelectedBooks()
 
-            is BookshelfUiIntent.RefreshBooks -> {  }//handleRefreshBooks()
+            is BookshelfUiIntent.RefreshBooks -> handleRefreshBooks()
 
             is BookshelfUiIntent.ToggleSelectionMode -> updateState { copy(isSelectionMode = !isSelectionMode, selectedBooks = emptySet()) }
             is BookshelfUiIntent.ToggleSelectBook -> handleToggleSelectBook(intent.bookUrl)
@@ -147,6 +157,82 @@ class BookshelfViewModel(
             } catch (e: Exception) {
                 sendEffect(BookshelfUiEffect.ShowToast("删除失败: ${e.message}"))
             }
+        }
+    }
+
+    private fun handleRefreshBooks() {
+        if (refreshJob?.isActive == true) return
+
+        val books = uiState.value.books
+        if (books.isEmpty()) {
+            sendEffect(BookshelfUiEffect.ShowToast("书架中暂无书籍"))
+            return
+        }
+
+        updateState {
+            copy(
+                isRefreshing = true,
+                refreshCompletedCount = 0,
+                refreshTotalCount = books.size,
+                refreshBookTitle = "准备刷新目录"
+            )
+        }
+
+        refreshJob = viewModelScope.launch {
+            try {
+                val semaphore = Semaphore(permits = 3)
+                val results = supervisorScope {
+                    books.map { book ->
+                        async {
+                            semaphore.withPermit { refreshBookCatalog(book) }
+                        }
+                    }.awaitAll()
+                }
+
+                val successCount = results.count { it.errorMessage == null }
+                val failureCount = results.size - successCount
+                val updatedBookCount = results.count { it.addedChapterCount > 0 }
+                val addedChapterCount = results.sumOf { it.addedChapterCount }
+                val message = buildString {
+                    append("目录刷新完成：成功 $successCount 本")
+                    if (updatedBookCount > 0) append("，$updatedBookCount 本新增 $addedChapterCount 章")
+                    if (failureCount > 0) append("，失败 $failureCount 本")
+                }
+                sendEffect(BookshelfUiEffect.ShowToast(message))
+            } catch (e: CancellationException) {
+                throw e
+            } finally {
+                updateState {
+                    copy(
+                        isRefreshing = false,
+                        refreshBookTitle = ""
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshBookCatalog(book: Book): CatalogRefreshResult {
+        updateState { copy(refreshBookTitle = book.title) }
+        return try {
+            val localChapters = catalogRepository.loadData(book.url)
+            val detail = detailRepository.fetchData(book.url, book.ruleId)
+            val chapters = catalogRepository.fetchData(
+                catalogUrl = detail.catalogUrl,
+                ruleId = book.ruleId,
+                bookUrl = book.url
+            )
+            check(chapters.isNotEmpty()) { "获取到的章节目录为空" }
+            catalogRepository.saveData(book.url, chapters)
+            CatalogRefreshResult(
+                addedChapterCount = (chapters.size - localChapters.size).coerceAtLeast(0)
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            CatalogRefreshResult(errorMessage = e.message ?: "未知错误")
+        } finally {
+            updateState { copy(refreshCompletedCount = refreshCompletedCount + 1) }
         }
     }
 
@@ -290,6 +376,9 @@ data class BookshelfUiState(
     // 页面级状态
     val isLoading: Boolean = true,           // 首次冷启动加载中
     val isRefreshing: Boolean = false,       // 下拉刷新检测全本更新中
+    val refreshCompletedCount: Int = 0,
+    val refreshTotalCount: Int = 0,
+    val refreshBookTitle: String = "",
     val isSelectionMode: Boolean = false,    // 是否处于多选管理模式 (如批量删除/下载)
     val selectedBooks: Set<String> = emptySet(), // 当前选中的书本 URLs (用于批量操作)
 
@@ -300,6 +389,11 @@ data class BookshelfUiState(
     val exportChapterProgress: String = "" // 💡 文本显示进度，如 "50 / 120 章"
 
 ) : UiState
+
+private data class CatalogRefreshResult(
+    val addedChapterCount: Int = 0,
+    val errorMessage: String? = null
+)
 
 // ==========================================
 // 2. 用户意图 (UiIntent)

@@ -128,10 +128,13 @@ class ReaderViewModel(
 
                 updateState { copy(isInBookshelf = isBookInLibrary) }
 
-                var activeBook = sessionBook ?: localBook ?: Book(
+                val matchingSessionBook = sessionBook?.takeIf {
+                    it.url == bookUrl && it.ruleId == ruleId
+                }
+                var activeBook = localBook ?: matchingSessionBook ?: Book(
                         title = "未知书籍", author = "", cover = "", url = bookUrl, ruleId = ruleId
                     )
-                if (sessionBook == null) {
+                if (matchingSessionBook == null || localBook != null) {
                     sessionRepository.saveData(activeBook)
                 }
                 updateState { copy(bookTitle = activeBook.title.ifBlank { "目录" }) }
@@ -173,7 +176,7 @@ class ReaderViewModel(
                 }
 
                 if (catalogList.isEmpty()) {
-                    catalogList = catalogRepository.fetchData(bookUrl, ruleId)
+                    catalogList = catalogRepository.fetchData(bookUrl, ruleId, bookUrl)
                     sessionRepository.saveCatalog(catalogList)
                     if (isBookInLibrary) {
                         catalogRepository.saveData(bookUrl, catalogList)
@@ -214,7 +217,7 @@ class ReaderViewModel(
                 val deferred = chapterJobs.getOrPut(url) {
                     viewModelScope.async(Dispatchers.IO) {
                         logger.info { "加载URL $url" }
-                        readerRepository.fetchData(url, ruleId)
+                        readerRepository.fetchData(url, ruleId, uiState.value.bookUrl)
                     }
                 }
 
@@ -337,7 +340,7 @@ class ReaderViewModel(
 
                 val deferredJob = async {
                     retry(maxAttempts = MAX_RETRIES, delayBaseMs = RETRY_DELAY_BASE_MS) {
-                        readerRepository.fetchData(url, ruleId)
+                        readerRepository.fetchData(url, ruleId, uiState.value.bookUrl)
                     }
                 }
                 chapterJobs[url] = deferredJob

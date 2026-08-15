@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -28,7 +29,9 @@ import coil3.memory.MemoryCache
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
+import coil3.request.CachePolicy
 import coil3.request.ImageRequest
+import coil3.size.Dimension
 import com.zhhz.spider.manager.imageRequest
 import com.zhhz.spider.viewModel.ChapterBlock
 import com.zhhz.spider.viewModel.MangaImage
@@ -211,16 +214,22 @@ fun MangaReaderView(
     val buildRequest: (MangaImage, Boolean) -> ImageRequest = { mangaImage, isImageDecrypt ->
         imageRequest(ruleId, uiState.bookUrl, mangaImage, isImageDecrypt, context)
     }
+    val buildPreloadRequest: (MangaImage, Boolean) -> ImageRequest = { mangaImage, isImageDecrypt ->
+        buildRequest(mangaImage, isImageDecrypt).newBuilder()
+            .memoryCachePolicy(CachePolicy.DISABLED)
+            .size(1, 1)
+            .build()
+    }
     val preloadedImages = remember { mutableSetOf<String>() }
 
     // 内容到达后立即预取首屏及下一屏，避免预取依赖第一次滚动事件。
     LaunchedEffect(flattenedImages, uiState.currentProgress) {
         val preloadStart = calculateImageIndex(uiState.content.blocks, uiState.currentProgress)
             .coerceIn(0, flattenedImages.size)
-        flattenedImages.drop(preloadStart).take(8).forEach { entry ->
+        flattenedImages.drop(preloadStart).take(3).forEach { entry ->
             val key = "${entry.image.url}|${entry.isImageDecrypt}"
             if (preloadedImages.add(key)) {
-                imageLoader.enqueue(buildRequest(entry.image, entry.isImageDecrypt))
+                imageLoader.enqueue(buildPreloadRequest(entry.image, entry.isImageDecrypt))
             }
         }
     }
@@ -246,9 +255,9 @@ fun MangaReaderView(
                 // 💡 4. 核心：通过算法，将绝对索引精准转换为没有 Header 污染的“纯图片绝对索引”！
                 val realImageIndex = calculateImageIndex(uiState.content.blocks, lastVisibleIndex)
 
-                val preloadCount = 5
+                val preloadCount = 2
 
-                // 💡 5. 此时进行切片，绝对不会再发生越界和空列表的问题，100% 精准截取后续 5 张图！
+                // 💡 5. 此时进行切片，避免越界并只预取紧邻的图片。
                 val startIndex = minOf(realImageIndex + 1, flattenedImages.size)
                 val endIndex = minOf(startIndex + preloadCount, flattenedImages.size)
 
@@ -257,7 +266,7 @@ fun MangaReaderView(
                 imagesToPreload.forEach { entry ->
                     val key = "${entry.image.url}|${entry.isImageDecrypt}"
                     if (preloadedImages.add(key)) {
-                        imageLoader.enqueue(buildRequest(entry.image, entry.isImageDecrypt))
+                        imageLoader.enqueue(buildPreloadRequest(entry.image, entry.isImageDecrypt))
                     }
                 }
             }
@@ -340,41 +349,40 @@ fun MangaReaderView(
                 // 2. 渲染该章节的所有图片
                 items(block.images, key = { it.url }) { image ->
                     var retryVersion by remember(image.url) { mutableIntStateOf(0) }
-                    // UI painter 独占自己的请求，避免与后台预取共享执行状态。
-                    val request = remember(image.url, block.isImageDecrypt, retryVersion, appliedReloadVersion) {
-                        buildRequest(image, block.isImageDecrypt)
-                    }
 
-                    // AsyncImage 会根据实际布局约束选择解码尺寸，并在状态变化后主动重测量。
-                    Box(modifier = Modifier.fillMaxWidth()) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val targetWidth = constraints.maxWidth
+                        // Decode to the viewport width instead of the source image's full size.
+                        // This is the expensive operation that otherwise blocks scrolling when a
+                        // new page enters the viewport.
+                        val request = remember(
+                            image.url,
+                            block.isImageDecrypt,
+                            retryVersion,
+                            appliedReloadVersion,
+                            targetWidth
+                        ) {
+                            buildRequest(image, block.isImageDecrypt).newBuilder()
+                                .size(Dimension.Pixels(targetWidth), Dimension.Undefined)
+                                .build()
+                        }
                         var painterState by remember(image.url, retryVersion, appliedReloadVersion) {
                             mutableStateOf<AsyncImagePainter.State?>(null)
                         }
 
-                        AsyncImage(
-                            model = request,
-                            contentDescription = null,
-                            contentScale = ContentScale.FillWidth,
-                            modifier = Modifier.fillMaxWidth(),
-                            onState = { painterState = it }
-                        )
+                        // Keep a small minimum height without replacing the image with a fixed
+                        // loading block. Replacing the block caused a second LazyColumn measure
+                        // pass exactly while the user was scrolling.
+                        Box(modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp)) {
+                            AsyncImage(
+                                model = request,
+                                contentDescription = null,
+                                contentScale = ContentScale.FillWidth,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
+                                onState = { painterState = it }
+                            )
 
-                        // 状态遮罩层
-                        when (painterState) {
-                            is AsyncImagePainter.State.Empty,
-                            is AsyncImagePainter.State.Loading -> {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().height(300.dp).background(Color(0xFF1E1E1E)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(32.dp),
-                                        color = MaterialTheme.colorScheme.primary,
-                                        strokeWidth = 3.dp
-                                    )
-                                }
-                            }
-                            is AsyncImagePainter.State.Error -> {
+                            if (painterState is AsyncImagePainter.State.Error) {
                                 Column(
                                     modifier = Modifier.fillMaxWidth().height(300.dp).background(Color(0xFF1E1E1E)),
                                     verticalArrangement = Arrangement.Center,
@@ -387,7 +395,6 @@ fun MangaReaderView(
                                     }
                                 }
                             }
-                            else -> Unit
                         }
                     }
                 }

@@ -28,9 +28,13 @@ class SearchRepositoryImpl(
     private val bookDao: BookDao                  // 用来加入书架
 ) : SearchRepository {
 
-    override fun fetchData(keyword: String, page: Int): Flow<List<SearchBook>> = channelFlow {
-        val enabledRules = ruleRepository.getEnabledRules()
-        if (enabledRules.isEmpty()) throw Exception("没有启用任何书源")
+    override fun fetchData(keyword: String, page: Int, ruleId: String?): Flow<List<SearchBook>> = channelFlow {
+        val enabledRules = ruleRepository.getEnabledRules().let { rules ->
+            if (ruleId == null) rules else rules.filter { it.id == ruleId }
+        }
+        if (enabledRules.isEmpty()) {
+            throw Exception(if (ruleId == null) "没有启用任何书源" else "所选规则未启用或不存在")
+        }
 
         // 用于收集所有成功返回的原始数据（未合并版）
         val accumulatedRawResults = mutableListOf<SearchBook>()

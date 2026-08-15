@@ -239,6 +239,9 @@ fun SourceRule.toEntity(isEnabled: Boolean = true): RuleEntity {
     )
 }
 
+/** 详情地址规则可将用户输入的 ID 转换成实际详情页地址。 */
+fun SourceRule.supportsIdSearch(): Boolean = detail.urlSelector.steps.isNotEmpty()
+
 fun RuleEntity.toDomain(): SourceRule {
     return Json.decodeFromString<SourceRule>(jsonContent)
     //return JSON.parseObject(this.jsonContent, SourceRule::class.java, JSONReader.Feature.FieldBased)
