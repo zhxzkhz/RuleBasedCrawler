@@ -22,6 +22,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 
 class BookshelfViewModel(
@@ -81,6 +84,9 @@ class BookshelfViewModel(
 
             is BookshelfUiIntent.DownloadSelectedBooks -> handleDownloadSelectedBooks()
 
+            is BookshelfUiIntent.ExportSelectedAsJson -> handleExportSelectedAsJson()
+            is BookshelfUiIntent.ImportBooks -> handleImportBooks(intent.jsonContent)
+
             is BookshelfUiIntent.RefreshBooks -> handleRefreshBooks()
 
             is BookshelfUiIntent.ToggleSelectionMode -> updateState { copy(isSelectionMode = !isSelectionMode, selectedBooks = emptySet()) }
@@ -126,17 +132,11 @@ class BookshelfViewModel(
             return
         }
 
-        // 💡 为了防丢状态：在跳进阅读器前，先把书装进内存会话，自动触发底层的 forkContext()
+        // 💡 为了防丢状态：跳转详情前，先把书装进内存会话，自动触发底层的 forkContext()
         viewModelScope.launch {
             sessionRepository.saveData(book)
 
-            sendEffect(
-                BookshelfUiEffect.NavigateToReader(
-                    bookUrl = book.url,
-                    ruleId = book.ruleId,
-                    bookTitle = book.title
-                )
-            )
+            sendEffect(BookshelfUiEffect.NavigateToDetail(book = book))
         }
     }
 
@@ -265,6 +265,43 @@ class BookshelfViewModel(
                 allBookUrls // 否则，一键全选所有书籍
             }
             copy(selectedBooks = updatedSelected)
+        }
+    }
+
+    // 💡 核心实现：将选中书籍导出为书架备份 JSON（含章节目录与阅读进度）
+    private fun handleExportSelectedAsJson() {
+        val selectedUrls = uiState.value.selectedBooks
+        if (selectedUrls.isEmpty()) return
+
+        viewModelScope.launch {
+            try {
+                val content = repository.exportBackupJson(selectedUrls)
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                sendEffect(BookshelfUiEffect.SaveBookshelfBackup("bookshelf_backup_$timestamp.json", content))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                sendEffect(BookshelfUiEffect.ShowToast("导出书架失败: ${e.message}"))
+            }
+        }
+    }
+
+    // 💡 核心实现：从备份 JSON 导入书籍（已存在的跳过，保护本地阅读进度）
+    private fun handleImportBooks(jsonContent: String) {
+        viewModelScope.launch {
+            try {
+                val result = repository.importBackupJson(jsonContent)
+                val message = when {
+                    result.addedCount == 0 && result.skippedCount > 0 -> "书架中已存在全部 ${result.skippedCount} 本，未做修改"
+                    result.skippedCount == 0 -> "导入完成：新增 ${result.addedCount} 本"
+                    else -> "导入完成：新增 ${result.addedCount} 本，跳过已存在 ${result.skippedCount} 本"
+                }
+                sendEffect(BookshelfUiEffect.ShowToast(message))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                sendEffect(BookshelfUiEffect.ShowToast("导入书架失败: ${e.message}"))
+            }
         }
     }
 
@@ -423,6 +460,12 @@ sealed class BookshelfUiIntent : UiIntent {
 
     data object DownloadSelectedBooks : BookshelfUiIntent()
 
+    // 💡 新增：将选中书籍导出为书架备份 JSON
+    data object ExportSelectedAsJson : BookshelfUiIntent()
+
+    // 💡 新增：从备份 JSON 导入书籍到书架
+    data class ImportBooks(val jsonContent: String) : BookshelfUiIntent()
+
     // 💡 新增：批量将选中书籍打包导出为 ZIP 的意图
     data class ExportSelectedBooks(val destinationDirectory: String,
                                    val onlyCached: Boolean,
@@ -455,12 +498,9 @@ sealed class BookshelfUiEffect : UiEffect {
     /** 弹出提示 */
     data class ShowToast(val message: String) : BookshelfUiEffect()
 
-    /** 💡 导航跳转：空降直达阅读器进行断点续读！*/
-    data class NavigateToReader(
-        val bookUrl: String,
-        val ruleId: String,
-        val bookTitle: String,
-        // 这里传 -1，让阅读器自行去库里捞精确断点进度
-        val chapterIndex: Int = -1
-    ) : BookshelfUiEffect()
+    /** 💡 书架备份 JSON 已生成，交给平台文件选择器保存 */
+    data class SaveBookshelfBackup(val fileName: String, val content: String) : BookshelfUiEffect()
+
+    /** 💡 导航跳转：进入书籍详情页（可查看目录、换源、续读）*/
+    data class NavigateToDetail(val book: Book) : BookshelfUiEffect()
 }

@@ -5,11 +5,16 @@ import com.zhhz.spider.manager.getActiveContext
 import com.zhhz.spider.network.Book
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.repository.SessionRepository
+import com.zhhz.spider.repository.impl.ExploreTabResolver
 import com.zhhz.spider.rule.ParseTraceEvent
 import com.zhhz.spider.rule.RuleParser
 import com.zhhz.spider.rule.Selector
 import com.zhhz.spider.rule.SourceRule
 import com.zhhz.spider.rule.VariableContext
+import com.zhhz.spider.rule.exploreAuthorSelector
+import com.zhhz.spider.rule.exploreDetailUrlSelector
+import com.zhhz.spider.rule.exploreListSelector
+import com.zhhz.spider.rule.exploreNameSelector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -146,6 +151,7 @@ object RuleDebugRunner {
             3 -> taskRunner.fetch(rule, rule.detail, input, ctx)
             4 -> taskRunner.fetch(rule, rule.catalog, input, ctx)
             5 -> taskRunner.fetch(rule, rule.content, input, ctx)
+            6 -> taskRunner.fetch(rule, rule.explore, input, ctx)
             else -> ""
         }
 
@@ -228,6 +234,43 @@ object RuleDebugRunner {
                     log.appendLine("√ 内容提取成功，共 ${text.size} 项")
                     text.take(20).forEachIndexed { index, item ->
                         log.appendLine("[$index] $item")
+                    }
+                }
+
+                6 -> {
+                    val explore = rule.explore
+
+                    // 静态分类（写死列表 / JS 生成）直接输出
+                    val staticTabs = ExploreTabResolver.resolveStatic(rule, ctx)
+                    if (staticTabs.isNotEmpty()) {
+                        log.appendLine("√ 静态/脚本分类 ${staticTabs.size} 个")
+                        staticTabs.forEach { log.appendLine(" • ${it.title} >> ${it.url}") }
+                    }
+
+                    if (explore.tabsSelector.steps.isNotEmpty()) {
+                        val tabs = traceList("ExplorePage.tabsSelector", html, explore.tabsSelector, ctx, traces)
+                        log.appendLine("√ 找到 ${tabs.size} 个分类")
+                        tabs.take(5).forEach {
+                            val name = traceString("ExplorePage.tabNameSelector", it, explore.tabNameSelector, ctx, traces)
+                            val url = traceString("ExplorePage.tabUrlSelector", it, explore.tabUrlSelector, ctx, traces)
+                            log.appendLine(" • $name >> $url")
+                        }
+                    }
+
+                    // 榜单列表结构未配置时回退复用搜索页选择器
+                    val listSelector = rule.exploreListSelector()
+                    if (explore.listSelector.steps.isEmpty() && listSelector.steps.isNotEmpty()) {
+                        log.appendLine("√ 书籍列表未单独配置，复用搜索页列表结构")
+                    }
+                    val books = traceList("ExplorePage.listSelector", html, listSelector, ctx, traces)
+                    if (books.isNotEmpty()) {
+                        log.appendLine("√ 书籍列表 ${books.size} 项")
+                        books.take(3).forEach { item ->
+                            val name = traceString("ExplorePage.nameSelector", item, rule.exploreNameSelector(), ctx, traces)
+                            val author = traceString("ExplorePage.authorSelector", item, rule.exploreAuthorSelector(), ctx, traces)
+                            val detailUrl = traceString("ExplorePage.detailUrlSelector", item, rule.exploreDetailUrlSelector(), ctx, traces)
+                            log.appendLine(" • 书名：$name\n\t\t\t作者：$author\n\t\t\t详细地址：$detailUrl")
+                        }
                     }
                 }
             }

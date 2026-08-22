@@ -1161,6 +1161,7 @@ private fun String.toRuleTabIndex(): Int? {
         startsWith("DetailPage.") -> 3
         startsWith("CatalogPage.") -> 4
         startsWith("ContentPage.") -> 5
+        startsWith("ExplorePage.") -> 6
         else -> null
     }
 }
@@ -1183,6 +1184,7 @@ fun getTabName(index: Int) = when (index) {
     3 -> "详情页"
     4 -> "目录页"
     5 -> "正文页"
+    6 -> "发现页"
     else -> "未知"
 }
 

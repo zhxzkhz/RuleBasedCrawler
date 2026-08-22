@@ -149,6 +149,41 @@ class TestServer(private val port: Int = 8080) {
                     }
                     call.respondText(html, ContentType.Text.Html)
                 }
+                // 5. 模拟发现/榜单入口页（分类标签）
+                get("/explore") {
+                    val html = """
+                    <html>
+                    <body>
+                        <div class="rank-tabs">
+                            <div class="tab-item"><a href="$baseUrl/rank/hot">热门榜</a></div>
+                            <div class="tab-item"><a href="$baseUrl/rank/new">新作榜</a></div>
+                        </div>
+                    </body>
+                    </html>
+                """.trimIndent()
+                    call.respondText(html, ContentType.Text.Html)
+                }
+
+                // 6. 模拟分类榜单列表页
+                get("/rank/{tabId}") {
+                    val tabId = call.parameters["tabId"] ?: ""
+                    val title = if (tabId == "hot") "《榜单热门第一》" else "《榜单新作第一》"
+
+                    val html = """
+                    <html>
+                    <body>
+                        <div class="book-list">
+                            <div class="book-item">
+                                <a class="title" href="$baseUrl/book/3001">$title</a>
+                                <span class="author">作者：王五</span>
+                                <img class="cover" src="$baseUrl/images/rank1.jpg"/>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                """.trimIndent()
+                    call.respondText(html, ContentType.Text.Html)
+                }
             }
         }
     }

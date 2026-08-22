@@ -16,6 +16,8 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.mozilla.javascript.NativeArray
+import org.mozilla.javascript.NativeObject
+import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.Undefined
 import org.mozilla.javascript.Wrapper
 import java.io.ByteArrayOutputStream
@@ -250,12 +252,22 @@ object JsExtensionClass {
             is Wrapper -> jsToJavaObject(value.unwrap())
             is CharSequence -> value.toString()
             is MutableMap<*, *> -> {
+                // 💡 Rhino 的 NativeObject 实现了 Map，但 put() 只允许在活跃的 JS Context 内调用，
+                // 在脚本上下文外写入会抛 UnsupportedOperationException。因此对 Rhino 对象退化为
+                // 只读转换并生成新的 LinkedHashMap；普通 Java Map（如 fastjson2 JSONObject）
+                // 仍然保持"原地递归转换并返回同一实例"的原有语义。
                 @Suppress("UNCHECKED_CAST")
                 val mutableMap = value as MutableMap<Any?, Any?>
-                mutableMap.keys.toList().forEach { key ->
-                    mutableMap[key] = jsToJavaObject(mutableMap[key])
+                if (value is ScriptableObject) {
+                    val converted = LinkedHashMap<Any?, Any?>(mutableMap.size)
+                    mutableMap.forEach { (key, v) -> converted[key] = jsToJavaObject(v) }
+                    converted
+                } else {
+                    mutableMap.keys.toList().forEach { key ->
+                        mutableMap[key] = jsToJavaObject(mutableMap[key])
+                    }
+                    value
                 }
-                value
             }
             else -> value
         }

@@ -11,6 +11,7 @@ import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.network.FileSnapshotInterceptor
 import com.zhhz.spider.network.HttpFetcher
+import com.zhhz.spider.network.BookDetail
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.rule.FetchConfig
 import com.zhhz.spider.rule.SourceRule
@@ -20,7 +21,9 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import java.nio.file.Files
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DetailRepositoryImplTest {
@@ -58,6 +61,64 @@ class DetailRepositoryImplTest {
     private fun testRunner(): FetchTaskRunner {
         val cacheDir = Files.createTempDirectory("detail-repository-test-cache").toFile()
         return FetchTaskRunner(HttpFetcher(FileSnapshotInterceptor(cacheDir)), FakeRuleDao())
+    }
+
+    @Test
+    fun saveDetailInfoPersistsAndLoadLocalDetailRoundTrips() = runTest {
+        val book = BookEntity(
+            detailUrl = "https://example.com/book/1",
+            ruleId = "rule-1",
+            title = "原标题",
+            author = "原作者",
+            cover = "cover.jpg"
+        )
+        val repository = DetailRepositoryImpl(
+            bookDao = FakeBookDao(listOf(book)),
+            fetchTaskRunner = testRunner(),
+            ruleRepository = FakeRuleRepository(emptyList()),
+            contextSessionManager = ContextSessionManager()
+        )
+
+        repository.saveDetailInfo(
+            book.detailUrl,
+            BookDetail(
+                url = book.detailUrl,
+                title = "",
+                author = "",
+                cover = "",
+                desc = "测试简介",
+                status = "",
+                latestChapterTitle = "",
+                catalogUrl = "https://example.com/book/1/catalog",
+                labels = listOf("热血", "冒险")
+            )
+        )
+
+        val local = repository.loadLocalDetail(book.detailUrl)
+        assertTrue(local != null)
+        assertEquals("测试简介", local.desc)
+        assertEquals("https://example.com/book/1/catalog", local.catalogUrl)
+        assertEquals(listOf("热血", "冒险"), local.labels)
+        // 网络返回的空字段不应覆盖本地已有值
+        assertEquals("原标题", local.title)
+        assertEquals("原作者", local.author)
+
+        // 未收藏过的书不会因浏览详情而生成记录
+        repository.saveDetailInfo(
+            "https://example.com/book/2",
+            BookDetail(
+                url = "https://example.com/book/2",
+                title = "新书",
+                author = "",
+                cover = "",
+                desc = "d",
+                status = "",
+                latestChapterTitle = "",
+                catalogUrl = "",
+                labels = emptyList()
+            )
+        )
+        assertNull(repository.loadLocalDetail("https://example.com/book/2"))
     }
 }
 
@@ -102,18 +163,33 @@ private class FakeRuleDao : RuleDao {
     }
 }
 
-private class FakeBookDao : BookDao {
-    override suspend fun addToBookshelf(book: BookEntity) = Unit
+private class FakeBookDao(
+    initialBooks: List<BookEntity> = emptyList()
+) : BookDao {
+    private val books = LinkedHashMap<String, BookEntity>().apply {
+        initialBooks.forEach { put(it.detailUrl, it) }
+    }
 
-    override fun getAllBooksFlow(): Flow<List<BookEntity>> = flowOf(emptyList())
+    override suspend fun addToBookshelf(book: BookEntity) {
+        books[book.detailUrl] = book
+    }
 
-    override fun getBookFlow(url: String): Flow<BookEntity?> = flowOf(null)
+    override fun getAllBooksFlow(): Flow<List<BookEntity>> = flowOf(books.values.toList())
 
-    override suspend fun getBookByUrl(url: String): BookEntity? = null
+    override fun getBookFlow(url: String): Flow<BookEntity?> = flowOf(books[url])
 
-    override suspend fun removeFromBookshelf(book: BookEntity) = Unit
+    override suspend fun getBookByUrl(url: String): BookEntity? = books[url]
 
-    override suspend fun deleteBookByUrl(url: String) = Unit
+    override suspend fun getBooksByUrls(urls: List<String>): List<BookEntity> =
+        urls.mapNotNull { books[it] }
+
+    override suspend fun removeFromBookshelf(book: BookEntity) {
+        books.remove(book.detailUrl)
+    }
+
+    override suspend fun deleteBookByUrl(url: String) {
+        books.remove(url)
+    }
 
     override suspend fun updateReadProgress(
         bookUrl: String,
@@ -125,7 +201,6 @@ private class FakeBookDao : BookDao {
     ) = Unit
 
     override fun getChaptersFlow(bookUrl: String): Flow<List<ChapterEntity>> = flowOf(emptyList())
-
     override suspend fun markAsRead(bookUrl: String, chapterUrl: String) = Unit
 
     override suspend fun insertChaptersIgnore(chapters: List<ChapterEntity>): List<Long> = emptyList()

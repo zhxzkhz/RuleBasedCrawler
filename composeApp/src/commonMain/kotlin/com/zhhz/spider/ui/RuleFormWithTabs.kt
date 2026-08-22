@@ -34,7 +34,7 @@ fun RuleFormWithTabs(
     onTabChange: (Int) -> Unit,
     onRuleChange: (SourceRule) -> Unit
 ) {
-    val tabs = listOf("基础信息", "登录页", "搜索页", "详情页", "目录页", "正文页")
+    val tabs = listOf("基础信息", "登录页", "搜索页", "详情页", "目录页", "正文页", "发现页")
 
 
     Column(Modifier.fillMaxSize()) {
@@ -74,6 +74,9 @@ fun RuleFormWithTabs(
                         }
                         5 -> {
                             ContentRuleForm(rule.content, highlightedSelectorName = highlightedSelectorName, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(content = it)) }
+                        }
+                        6 -> {
+                            ExploreRuleForm(rule.explore, highlightedSelectorName = highlightedSelectorName, onOpenJsEditor = onOpenJs){ onRuleChange(rule.copy(explore = it)) }
                         }
                     }
                 }

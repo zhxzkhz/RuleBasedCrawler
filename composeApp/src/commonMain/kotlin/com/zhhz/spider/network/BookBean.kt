@@ -43,6 +43,13 @@ data class Chapter(
     val url: String     // 抓取正文用的 URL
 )
 
+/** 发现/榜单页的一个分类标签 */
+@Serializable
+data class ExploreTab(
+    val title: String,
+    val url: String
+)
+
 // 旧 Android Rhino 曾把 Java 集合包装器序列化为该对象，供缓存迁移使用。
 fun Chapter.hasLegacyInvalidTitle(): Boolean {
     return title.trim() == "{\"empty\":false}" || title.trim() == "{\"empty\":true}"
@@ -56,7 +63,8 @@ data class BookDetail(
     val desc: String,
     val status: String,
     val latestChapterTitle: String,
-    val catalogUrl: String
+    val catalogUrl: String,
+    val labels: List<String> = emptyList()
 )
 
 data class ReaderContent(

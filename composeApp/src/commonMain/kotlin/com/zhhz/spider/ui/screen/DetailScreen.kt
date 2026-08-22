@@ -26,8 +26,9 @@ import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.arrow_back_24px
 import rulebasedcrawler.composeapp.generated.resources.check_24px
+import rulebasedcrawler.composeapp.generated.resources.refresh_24px
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun DetailScreen(
     detailUrl: String,
@@ -41,6 +42,9 @@ fun DetailScreen(
 
     // 💡 新增：用于控制“换源对话框”显示的本地状态
     var showSourceDialog by remember { mutableStateOf(false) }
+    val canToggleBookshelf = !uiState.isLoading &&
+            !uiState.isCatalogLoading &&
+            uiState.currentSource != null
 
     LaunchedEffect(detailUrl, ruleId) {
         viewModel.processIntent(DetailUiIntent.LoadDetail(detailUrl, ruleId))
@@ -73,6 +77,15 @@ fun DetailScreen(
                 navigationIcon = {
                     IconButton(onClick = { viewModel.processIntent(DetailUiIntent.NavigateBack) }) {
                         Icon(painterResource(Res.drawable.arrow_back_24px), "返回", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                },
+                actions = {
+                    // 手动刷新：默认进入详情页使用本地缓存，只有点击这里才重新请求网络
+                    IconButton(
+                        onClick = { viewModel.processIntent(DetailUiIntent.RefreshDetail) },
+                        enabled = !uiState.isLoading && !uiState.isCatalogLoading
+                    ) {
+                        Icon(painterResource(Res.drawable.refresh_24px), "刷新", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 }
             )
@@ -136,6 +149,34 @@ fun DetailScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                            }
+                        }
+                    }
+                }
+
+                if (uiState.labels.isNotEmpty()) {
+                    item {
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            uiState.labels.forEach { label ->
+                                Surface(
+                                    shape = RoundedCornerShape(50),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -209,7 +250,8 @@ fun DetailScreen(
                         OutlinedButton(
                             onClick = { viewModel.processIntent(DetailUiIntent.ToggleBookshelf) },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            enabled = canToggleBookshelf
                         ) {
                             Text(
                                 text = if (uiState.isInBookshelf) "移出书架" else "加入书架",

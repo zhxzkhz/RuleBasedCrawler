@@ -41,6 +41,10 @@ class DetailRepositoryImpl(
             val author = rule.detail.getBookAuthor(bookDetailHtml, ctx)
             val cover = rule.detail.getBookCover(bookDetailHtml, ctx)
             val desc = rule.detail.getBookDesc(bookDetailHtml, ctx)
+            val labels = rule.detail.getBookLabel(bookDetailHtml, ctx)
+                .map { it.toString().trim() }
+                .filter(String::isNotEmpty)
+                .distinct()
             val catalogUrl = rule.detail.getCatalogUrl(bookDetailHtml, ctx)
             ctx["title"] = title
             ctx["author"] = author
@@ -54,7 +58,42 @@ class DetailRepositoryImpl(
                 desc = desc,
                 status = "",
                 latestChapterTitle = "",
-                catalogUrl = catalogUrl
+                catalogUrl = catalogUrl,
+                labels = labels
+            )
+        }
+    }
+
+    override suspend fun loadLocalDetail(bookUrl: String): BookDetail? {
+        return withContext(Dispatchers.IO) {
+            bookDao.getBookByUrl(bookUrl)?.let { entity ->
+                BookDetail(
+                    url = entity.detailUrl,
+                    title = entity.title,
+                    author = entity.author,
+                    cover = entity.cover,
+                    desc = entity.description,
+                    status = "",
+                    latestChapterTitle = "",
+                    catalogUrl = entity.catalogUrl,
+                    labels = entity.category.split(",").map { it.trim() }.filter(String::isNotEmpty)
+                )
+            }
+        }
+    }
+
+    override suspend fun saveDetailInfo(bookUrl: String, detail: BookDetail) {
+        withContext(Dispatchers.IO) {
+            val existing = bookDao.getBookByUrl(bookUrl) ?: return@withContext
+            bookDao.addToBookshelf(
+                existing.copy(
+                    title = detail.title.ifBlank { existing.title },
+                    author = detail.author.ifBlank { existing.author },
+                    cover = detail.cover.ifBlank { existing.cover },
+                    description = detail.desc,
+                    category = detail.labels.joinToString(","),
+                    catalogUrl = detail.catalogUrl.ifBlank { existing.catalogUrl }
+                )
             )
         }
     }

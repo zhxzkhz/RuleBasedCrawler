@@ -185,6 +185,50 @@ data class LoginPage(
     }
 }
 
+/** 固定分类/榜单：直接写死在规则里的 名称+地址，无需从入口页解析 */
+@Serializable
+data class ExploreFixedTab(
+    val title: String = "",
+    val url: String = ""
+)
+
+/**
+ * 发现页：规则分类/榜单。
+ * 固定分类（fixedTabs）优先；未配置固定分类时，才从入口页解析动态标签。
+ * 书籍列表选择器未配置时回退复用搜索页结构。
+ */
+@Serializable
+data class ExplorePage(
+    override val config: FetchConfig = FetchConfig(),
+    override val urlSelector: Selector = Selector(),   // 发现入口地址，留空则使用书源主页 URL
+    val fixedTabs: List<ExploreFixedTab> = emptyList(), // 固定分类/榜单（写死 名称+地址）
+    var tabsScript: String? = null,                    // JS 脚本动态生成分类（返回 [{title,url}] 数组或 JSON 字符串）
+    val tabsSelector: Selector = Selector(),           // 分类/榜单标签列表
+    val tabNameSelector: Selector = Selector(),        // 分类名称
+    val tabUrlSelector: Selector = Selector(),         // 分类对应的书籍列表页地址
+    val listSelector: Selector = Selector(),           // 分类下的书籍列表
+    val nameSelector: Selector = Selector(),
+    val authorSelector: Selector = Selector(),
+    val coverSelector: Selector = Selector(),
+    val detailUrlSelector: Selector = Selector()
+) : IPage {
+    fun getExploreUrl(input: String, ctx: VariableContext): String {
+        val rawUrl = RuleParser.parseString(input, urlSelector, ctx)
+        return RuleParser.resolveTemplate(rawUrl, input, ctx)
+    }
+    fun getTabs(text: String, ctx: VariableContext) = RuleParser.parseList(text, tabsSelector, ctx)
+    fun getTabName(item: Any, ctx: VariableContext) = RuleParser.parseString(item, tabNameSelector, ctx)
+    fun getTabUrl(item: Any, ctx: VariableContext): String {
+        val rawUrl = RuleParser.parseString(item, tabUrlSelector, ctx)
+        return RuleParser.resolveTemplate(rawUrl, rawUrl, ctx)
+    }
+    fun getList(text: String, ctx: VariableContext) = RuleParser.parseList(text, listSelector, ctx)
+    fun getName(item: Any, ctx: VariableContext) = RuleParser.parseString(item, nameSelector, ctx)
+    fun getAuthor(item: Any, ctx: VariableContext) = RuleParser.parseString(item, authorSelector, ctx)
+    fun getCover(item: Any, ctx: VariableContext) = RuleParser.parseString(item, coverSelector, ctx)
+    fun getDetailUrl(item: Any, ctx: VariableContext) = RuleParser.parseString(item, detailUrlSelector, ctx)
+}
+
 /**
  * 顶层规则对象 (JSON 导入/导出的直接目标)
  */
@@ -206,7 +250,8 @@ data class SourceRule(
     val search: SearchPage = SearchPage(),
     val detail: DetailPage = DetailPage(),
     val catalog: CatalogPage = CatalogPage(),
-    val content: ContentPage = ContentPage()
+    val content: ContentPage = ContentPage(),
+    val explore: ExplorePage = ExplorePage()
 )
 
 data class TagAction(val useCache: Boolean)
@@ -241,6 +286,31 @@ fun SourceRule.toEntity(isEnabled: Boolean = true): RuleEntity {
 
 /** 详情地址规则可将用户输入的 ID 转换成实际详情页地址。 */
 fun SourceRule.supportsIdSearch(): Boolean = detail.urlSelector.steps.isNotEmpty()
+
+// 💡 大多数网站榜单列表与搜索列表 DOM 结构一致：
+// 榜单的书籍列表选择器未单独配置时，直接回退复用搜索页的选择器。
+fun SourceRule.exploreListSelector(): Selector =
+    explore.listSelector.takeIf { it.steps.isNotEmpty() } ?: search.listSelector
+
+fun SourceRule.exploreNameSelector(): Selector =
+    explore.nameSelector.takeIf { it.steps.isNotEmpty() } ?: search.nameSelector
+
+fun SourceRule.exploreAuthorSelector(): Selector =
+    explore.authorSelector.takeIf { it.steps.isNotEmpty() } ?: search.authorSelector
+
+fun SourceRule.exploreCoverSelector(): Selector =
+    explore.coverSelector.takeIf { it.steps.isNotEmpty() } ?: search.coverSelector
+
+fun SourceRule.exploreDetailUrlSelector(): Selector =
+    explore.detailUrlSelector.takeIf { it.steps.isNotEmpty() } ?: search.detailUrlSelector
+
+/** 规则是否配置了可用的发现/榜单规则（固定分类/JS 生成/动态标签三选一；列表结构可回退复用搜索页） */
+fun SourceRule.supportsExplore(): Boolean =
+    (explore.fixedTabs.any { it.title.isNotBlank() && it.url.isNotBlank() } ||
+            !explore.tabsScript.isNullOrBlank() ||
+            explore.tabsSelector.steps.isNotEmpty()) &&
+            exploreListSelector().steps.isNotEmpty() &&
+            exploreDetailUrlSelector().steps.isNotEmpty()
 
 fun RuleEntity.toDomain(): SourceRule {
     return Json.decodeFromString<SourceRule>(jsonContent)

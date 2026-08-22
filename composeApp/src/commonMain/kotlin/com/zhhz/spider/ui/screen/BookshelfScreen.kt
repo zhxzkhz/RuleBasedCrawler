@@ -21,8 +21,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhhz.spider.ReaderGraph
+import com.zhhz.spider.DetailRoute
 import com.zhhz.spider.rememberBookExportDirectoryAction
+import com.zhhz.spider.rememberRuleFileActions
 import com.zhhz.spider.model.DownloadStatus
 import com.zhhz.spider.model.DownloadTask
 import com.zhhz.spider.network.Book
@@ -40,7 +41,8 @@ import rulebasedcrawler.composeapp.generated.resources.*
 fun BookshelfScreen(
     viewModel: BookshelfViewModel,
     onGoToSearch: () -> Unit,
-    onNavigateToReader: (ReaderGraph.Reader) -> Unit,
+    onOpenExplore: () -> Unit,
+    onNavigateToDetail: (DetailRoute) -> Unit,
     onOpenRuleManagement: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -65,6 +67,24 @@ fun BookshelfScreen(
         }
     }
 
+    // 书架备份 JSON 的导入/导出（复用规则文件的系统文件选择器）
+    val ruleFileActions = rememberRuleFileActions(
+        onOpenResult = { result ->
+            result.onSuccess { json ->
+                viewModel.processIntent(BookshelfUiIntent.ImportBooks(json))
+            }.onFailure {
+                scope.launch { snackbarHostState.showSnackbar("读取书架备份失败: ${it.message}") }
+            }
+        },
+        onSaveResult = { result ->
+            result.onSuccess {
+                scope.launch { snackbarHostState.showSnackbar("书架备份导出成功") }
+            }.onFailure {
+                scope.launch { snackbarHostState.showSnackbar("保存书架备份失败: ${it.message}") }
+            }
+        }
+    )
+
     // 副作用监听 (Toast 和 跳页)
     LaunchedEffect(Unit) {
         viewModel.uiEffect.collect { effect ->
@@ -73,13 +93,17 @@ fun BookshelfScreen(
                     snackbarHostState.currentSnackbarData?.dismiss()
                     launch { snackbarHostState.showSnackbar(effect.message) }
                 }
-                is BookshelfUiEffect.NavigateToReader -> {
-                    onNavigateToReader(ReaderGraph.Reader(
-                        bookUrl = effect.bookUrl,
-                        chapterIndex = -1, // 传入 -1 让它自主查库
-                        chapterTitle = "", // 书架进入时，具体章节标题可以暂时为空
-                        ruleId = effect.ruleId
+                is BookshelfUiEffect.NavigateToDetail -> {
+                    onNavigateToDetail(DetailRoute(
+                        title = effect.book.title,
+                        author = effect.book.author,
+                        cover = effect.book.cover,
+                        detailUrl = effect.book.url,
+                        ruleId = effect.book.ruleId
                     ))
+                }
+                is BookshelfUiEffect.SaveBookshelfBackup -> {
+                    ruleFileActions.saveJsonFile(effect.fileName, effect.content)
                 }
             }
         }
@@ -97,7 +121,9 @@ fun BookshelfScreen(
                 },
                 onRefresh = { viewModel.processIntent(BookshelfUiIntent.RefreshBooks) },
                 onGoToSearch = onGoToSearch,
+                onOpenExplore = onOpenExplore,
                 onOpenRuleManagement = onOpenRuleManagement,
+                onImportBookshelf = { ruleFileActions.openJsonFile() },
             )
         },
         // 💡 多选模式下的底部操作栏
@@ -136,6 +162,15 @@ fun BookshelfScreen(
                             Icon(painterResource(Res.drawable.share_24px), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("导出ZIP", color = MaterialTheme.colorScheme.primary)
+                        }
+
+                        // 新增：导出选中书籍的书架备份 JSON（元数据+目录+进度）
+                        TextButton(
+                            onClick = { viewModel.processIntent(BookshelfUiIntent.ExportSelectedAsJson) }
+                        ) {
+                            Icon(painterResource(Res.drawable.save_24px), contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("导出书架", color = MaterialTheme.colorScheme.secondary)
                         }
 
                     }
@@ -332,7 +367,9 @@ private fun BookshelfTopBar(
     onSelectAll: () -> Unit, // 全选/取消全选
     onRefresh: () -> Unit,
     onGoToSearch: () -> Unit,
-    onOpenRuleManagement: () -> Unit
+    onOpenExplore: () -> Unit,
+    onOpenRuleManagement: () -> Unit,
+    onImportBookshelf: () -> Unit
 ) {
     Column {
         if (uiState.isSelectionMode) {
@@ -365,8 +402,14 @@ private fun BookshelfTopBar(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenExplore) {
+                        Icon(painterResource(Res.drawable.list_24px), "榜单")
+                    }
                     IconButton(onClick = onOpenRuleManagement) {
                         Icon(painterResource(Res.drawable.code_blocks_24px), "规则管理")
+                    }
+                    IconButton(onClick = onImportBookshelf) {
+                        Icon(painterResource(Res.drawable.login_24px), "导入书架")
                     }
                     IconButton(
                         onClick = onRefresh,

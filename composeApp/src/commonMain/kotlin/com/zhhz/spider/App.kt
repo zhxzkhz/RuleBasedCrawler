@@ -42,6 +42,7 @@ import com.zhhz.spider.ui.screen.*
 import com.zhhz.spider.util.DecryptingFetcher
 import com.zhhz.spider.viewModel.BookshelfViewModel
 import com.zhhz.spider.viewModel.DetailViewModel
+import com.zhhz.spider.viewModel.ExploreViewModel
 import com.zhhz.spider.viewModel.ReaderViewModel
 import com.zhhz.spider.viewModel.SearchViewModel
 import com.zhhz.spider.viewModel.ReaderUiIntent
@@ -149,8 +150,9 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
                         BookshelfScreen(
                             viewModel = koinViewModel<BookshelfViewModel>(),
                             onGoToSearch = { navController.navigate("search") },
-                            onNavigateToReader = { book ->
-                                navController.navigate(book)
+                            onOpenExplore = { navController.navigate("explore") },
+                            onNavigateToDetail = { route ->
+                                navController.navigate(route)
                             },
                             onOpenRuleManagement = { navController.navigate("rules") }
                         )
@@ -171,6 +173,15 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
                             onNavigateBack = { navController.popBackStackSafe() },
                             onNavigateToDetail = { route ->
                                 // 跳转详情并传递参数
+                                navController.navigate(route)
+                            }
+                        )
+                    }
+                    composable("explore") {
+                        ExploreScreen(
+                            viewModel = koinViewModel<ExploreViewModel>(),
+                            onNavigateBack = { navController.popBackStackSafe() },
+                            onNavigateToDetail = { route ->
                                 navController.navigate(route)
                             }
                         )

@@ -4,10 +4,12 @@ import androidx.lifecycle.viewModelScope
 import com.zhhz.spider.ReaderGraph
 import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.network.Book
+import com.zhhz.spider.network.BookDetail
 import com.zhhz.spider.network.Chapter
 import com.zhhz.spider.network.SearchBookSource
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.DetailRepository
+import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.ui.base.BaseViewModel
 import com.zhhz.spider.ui.base.UiEffect
@@ -21,7 +23,8 @@ class DetailViewModel(
     private val ruleId: String,
     private val detailRepository: DetailRepository,
     private val catalogRepository: CatalogRepository,
-    private val sessionRepository: SessionRepository
+    private val sessionRepository: SessionRepository,
+    private val ruleRepository: RuleRepository
 ) : BaseViewModel<DetailUiState, DetailUiIntent, DetailUiEffect>(
     initialState = DetailUiState()
 ) {
@@ -33,6 +36,15 @@ class DetailViewModel(
     override fun handleIntent(intent: DetailUiIntent) {
         when (intent) {
             is DetailUiIntent.LoadDetail -> loadBookDetail(intent.detailUrl, intent.ruleId)
+            is DetailUiIntent.RefreshDetail -> {
+                // 手动刷新：始终以当前选中书源为准重新走网络
+                val source = uiState.value.currentSource
+                if (source != null) {
+                    loadBookDetail(source.url, source.ruleId, forceReload = true)
+                } else {
+                    loadBookDetail(this.detailUrl, this.ruleId, forceReload = true)
+                }
+            }
             is DetailUiIntent.ChangeSource -> handleChangeSource(intent.source)
             is DetailUiIntent.ChapterClicked -> handleChapterClicked(intent.chapter)
             is DetailUiIntent.ToggleBookshelf -> handleToggleBookshelf()
@@ -51,12 +63,23 @@ class DetailViewModel(
             return
         }
         val availableSources = sessionRepository.loadData()?.availableSources?.ifEmpty { null }
-            ?: listOf(SearchBookSource(ruleId = ruleId, sourceName = "默认书源", url = detailUrl))
+            ?: listOf(SearchBookSource(ruleId = ruleId, sourceName = "", url = detailUrl))
+
+        // 💡 用规则库中的真实书源名替换占位名称，避免详情页显示“默认书源”
+        val resolvedSources = availableSources.map { source ->
+            val ruleName = ruleRepository.getEnabledRules()
+                .find { it.id == source.ruleId }?.name?.ifBlank { null } ?: source.ruleId
+            if (source.sourceName.isBlank() || source.sourceName == "默认书源") {
+                source.copy(sourceName = ruleName)
+            } else {
+                source
+            }
+        }
 
         // 标记当前源
-        val source = availableSources.find { it.ruleId == ruleId && it.url == detailUrl }
+        val source = resolvedSources.find { it.ruleId == ruleId && it.url == detailUrl }
 
-        updateState { copy(currentSource = source, availableSources = availableSources, isCatalogLoading = true , isLoading = true, chapters = emptyList()) }
+        updateState { copy(currentSource = source, availableSources = resolvedSources, isCatalogLoading = true , isLoading = true, chapters = emptyList()) }
 
         // 监听本地书架状态变更（是否已收藏）
         viewModelScope.launch {
@@ -83,37 +106,73 @@ class DetailViewModel(
                     }
                 }
 
-                val detailData = detailRepository.fetchData(detailUrl, ruleId)
-
-                // 💡 自动派发：网页数据回来后，拼装成完整的 Book，自动更新内存 Session 和会话克隆
-                val updatedBook = Book(
-                    title = detailData.title.ifBlank { uiState.value.title },
-                    author = detailData.author.ifBlank { uiState.value.author },
-                    cover = detailData.cover.ifBlank { uiState.value.cover },
-                    url = detailUrl,
-                    ruleId = ruleId
-                )
-                sessionRepository.saveData(updatedBook)
-
+            // 💡 缓存优先：书架书籍默认完全使用本地数据展示，绝不发网络请求。
+            // 旧数据可能还没有简介/目录，此时显示空内容，由用户手动刷新补全。
+            if (!forceReload && localBook != null) {
+                val localDetail = detailRepository.loadLocalDetail(detailUrl)
+                val localChapters = catalogRepository.loadData(detailUrl)
+                if (localChapters.isNotEmpty()) {
+                    sessionRepository.saveCatalog(localChapters)
+                }
                 updateState {
                     copy(
                         bookUrl = detailUrl,
-                        title = detailData.title.ifBlank { title },
-                        author = detailData.author.ifBlank { author },
-                        cover = detailData.cover.ifBlank { cover },
-                        desc = detailData.desc,
-                        status = detailData.status,
-                        latestChapterTitle = detailData.latestChapterTitle,
-                        catalogUrl = detailData.catalogUrl,
-                        isLoading = false
+                        title = localDetail?.title?.ifBlank { uiState.value.title } ?: uiState.value.title,
+                        author = localDetail?.author?.ifBlank { uiState.value.author } ?: uiState.value.author,
+                        cover = localDetail?.cover?.ifBlank { uiState.value.cover } ?: uiState.value.cover,
+                        desc = localDetail?.desc?.ifBlank { "暂无简介" } ?: "暂无简介",
+                        status = localDetail?.status.orEmpty(),
+                        latestChapterTitle = localChapters.lastOrNull()?.title.orEmpty(),
+                        catalogUrl = localDetail?.catalogUrl.orEmpty(),
+                        labels = localDetail?.labels.orEmpty(),
+                        isLoading = false,
+                        isCatalogLoading = false,
+                        chapters = localChapters
                     )
                 }
+                return@launch
+            }
 
-                // 2. 请求目录
-                val chapterList = catalogRepository.fetchData(detailData.catalogUrl, ruleId)
-                updateState {
-                    copy(chapters = chapterList, isCatalogLoading = false)
-                }
+            val detailData = detailRepository.fetchData(detailUrl, ruleId)
+
+            // 💡 自动派发：网页数据回来后，拼装成完整的 Book，自动更新内存 Session 和会话克隆
+            val updatedBook = Book(
+                title = detailData.title.ifBlank { uiState.value.title },
+                author = detailData.author.ifBlank { uiState.value.author },
+                cover = detailData.cover.ifBlank { uiState.value.cover },
+                url = detailUrl,
+                ruleId = ruleId
+            )
+            sessionRepository.saveData(updatedBook)
+
+            updateState {
+                copy(
+                    bookUrl = detailUrl,
+                    title = detailData.title.ifBlank { title },
+                    author = detailData.author.ifBlank { author },
+                    cover = detailData.cover.ifBlank { cover },
+                    desc = detailData.desc,
+                    status = detailData.status,
+                    latestChapterTitle = detailData.latestChapterTitle,
+                    catalogUrl = detailData.catalogUrl,
+                    labels = detailData.labels,
+                    isLoading = false
+                )
+            }
+
+            // 2. 请求目录
+            val chapterList = catalogRepository.fetchData(detailData.catalogUrl, ruleId)
+            updateState {
+                copy(
+                    chapters = chapterList,
+                    isCatalogLoading = false,
+                    latestChapterTitle = detailData.latestChapterTitle.ifBlank { chapterList.lastOrNull()?.title.orEmpty() }
+                )
+            }
+
+            // 💡 详情持久化：把简介/标签/目录地址等写回本地，下次进入直接秒开
+            // 仅更新数据库中已存在的行（浏览未收藏的书不会生成书架记录）
+            detailRepository.saveDetailInfo(detailUrl, detailData)
 
                 // 💡 节点 A 自动同步：如果这本书已经在书架中，网络更新完目录后立刻写入本地 DB 保底！
                 if (uiState.value.isInBookshelf) {
@@ -166,10 +225,14 @@ class DetailViewModel(
 
     private fun handleToggleBookshelf() {
         val state = uiState.value
+        if (state.isLoading || state.isCatalogLoading || state.currentSource == null) {
+            sendEffect(DetailUiEffect.ShowToast("书本加载完成后才能操作书架"))
+            return
+        }
         // 获取当前正在浏览的书源 URL
-        val url = state.currentSource?.url
+        val url = state.currentSource.url
 
-        val ruleId = state.currentSource?.ruleId
+        val ruleId = state.currentSource.ruleId
 
         if (url.isNullOrBlank() || ruleId.isNullOrBlank()) {
             sendEffect(DetailUiEffect.ShowToast("未获取到当前书源链接，无法操作"))
@@ -198,6 +261,23 @@ class DetailViewModel(
                     // 严格遵循规范命名：保存调用 saveData
                     detailRepository.saveData(entity)
                     catalogRepository.saveData(url, state.chapters)
+                    // 💡 加入书架时同步持久化详情信息（简介/标签/目录地址），供离线秒开
+                    if (state.desc.isNotBlank() && state.desc != "加载失败") {
+                        detailRepository.saveDetailInfo(
+                            url,
+                            BookDetail(
+                                url = url,
+                                title = state.title,
+                                author = state.author,
+                                cover = state.cover,
+                                desc = state.desc,
+                                status = state.status,
+                                latestChapterTitle = state.latestChapterTitle,
+                                catalogUrl = state.catalogUrl,
+                                labels = state.labels
+                            )
+                        )
+                    }
                     sendEffect(DetailUiEffect.ShowToast("已成功加入书架"))
                 }
 
@@ -229,6 +309,7 @@ data class DetailUiState(
     val status: String = "", // 连载/完结
     val latestChapterTitle: String = "",
     val catalogUrl: String = "", // 有些源的目录页和详情页不在同一个URL
+    val labels: List<String> = emptyList(),
 
     // --- 页面状态 ---
     val isLoading: Boolean = true,
@@ -241,6 +322,8 @@ data class DetailUiState(
 sealed class DetailUiIntent : UiIntent {
     // 页面初始化加载
     data class LoadDetail(val detailUrl: String, val ruleId: String) : DetailUiIntent()
+    // 手动刷新：强制走网络重新拉取详情与目录
+    data object RefreshDetail : DetailUiIntent()
     // 切换书源
     data class ChangeSource(val source: SearchBookSource) : DetailUiIntent()
     // 章节点击意图

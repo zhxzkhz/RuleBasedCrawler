@@ -15,6 +15,7 @@ import com.zhhz.spider.repository.impl.*
 import com.zhhz.spider.util.BookPackager
 import com.zhhz.spider.viewModel.BookshelfViewModel
 import com.zhhz.spider.viewModel.DetailViewModel
+import com.zhhz.spider.viewModel.ExploreViewModel
 import com.zhhz.spider.viewModel.ReaderViewModel
 import com.zhhz.spider.viewModel.SearchViewModel
 import org.koin.core.module.dsl.bind
@@ -86,6 +87,10 @@ val commonModule = module {
         bind<ReaderRepository>()
     }
 
+    singleOf(::ExploreRepositoryImpl) {
+        bind<ExploreRepository>()
+    }
+
 
     // ================= 视图模型层 (ViewModel) =================
     // 一律使用 viewModel DSL 注册，享受最安全的生命周期管理和协程销毁
@@ -93,6 +98,7 @@ val commonModule = module {
     viewModelOf(::SearchViewModel)
     viewModelOf(::DetailViewModel)
     viewModelOf(::ReaderViewModel)
+    viewModelOf(::ExploreViewModel)
 
 
 }

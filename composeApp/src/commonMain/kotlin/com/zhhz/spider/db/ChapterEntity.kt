@@ -5,7 +5,9 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.zhhz.spider.network.Chapter
+import kotlinx.serialization.Serializable
 
+@Serializable
 @Entity(
     tableName = "chapters",
     // 建立外键约束：如果书删了，对应的目录也自动删除（级联删除）

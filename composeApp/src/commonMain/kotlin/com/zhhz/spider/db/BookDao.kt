@@ -18,6 +18,9 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE detailUrl = :url")
     suspend fun getBookByUrl(url: String): BookEntity?
 
+    @Query("SELECT * FROM books WHERE detailUrl IN (:urls)")
+    suspend fun getBooksByUrls(urls: List<String>): List<BookEntity>
+
     @Delete
     suspend fun removeFromBookshelf(book: BookEntity)
 

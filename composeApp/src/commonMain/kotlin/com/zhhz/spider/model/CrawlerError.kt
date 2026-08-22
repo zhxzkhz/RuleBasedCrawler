@@ -5,6 +5,7 @@ enum class CrawlerStage(val label: String) {
     DETAIL("详情"),
     CATALOG("目录"),
     CONTENT("正文"),
+    EXPLORE("发现"),
     NETWORK("网络"),
     PARSE("解析")
 }
