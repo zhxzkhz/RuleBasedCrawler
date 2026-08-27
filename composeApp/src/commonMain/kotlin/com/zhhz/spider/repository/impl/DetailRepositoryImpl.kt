@@ -90,8 +90,10 @@ class DetailRepositoryImpl(
                     title = detail.title.ifBlank { existing.title },
                     author = detail.author.ifBlank { existing.author },
                     cover = detail.cover.ifBlank { existing.cover },
-                    description = detail.desc,
-                    category = detail.labels.joinToString(","),
+                    description = detail.desc.ifBlank { existing.description },
+                    // 💡 合并语义：本次解析为空的字段保留数据库旧值，
+                    // 避免某次标签解析失败清掉已有的书架分类
+                    category = detail.labels.joinToString(",").ifBlank { existing.category },
                     catalogUrl = detail.catalogUrl.ifBlank { existing.catalogUrl }
                 )
             )
@@ -112,13 +114,33 @@ class DetailRepositoryImpl(
 
     override suspend fun saveData(book: Book) {
         withContext(Dispatchers.IO){
-            bookDao.addToBookshelf(book.toEntity())
+            val existing = bookDao.getBookByUrl(book.url)
+            if (existing != null) {
+                // 已存在（含软移除状态）：恢复在架并补全元数据，绝不覆盖阅读进度
+                bookDao.addToBookshelf(
+                    existing.copy(
+                        title = book.title.ifBlank { existing.title },
+                        author = book.author.ifBlank { existing.author },
+                        cover = book.cover.ifBlank { existing.cover },
+                        inLibrary = true
+                    )
+                )
+            } else {
+                // 首次加入书架必须标记为在架（Book 领域模型默认 inLibrary=false，直接落库会被书架过滤）
+                bookDao.addToBookshelf(book.copy(inLibrary = true).toEntity())
+            }
         }
     }
 
     override suspend fun deleteData(bookUrl: String) {
         withContext(Dispatchers.IO){
             bookDao.deleteBookByUrl(bookUrl)
+        }
+    }
+
+    override suspend fun setInLibrary(bookUrl: String, inLibrary: Boolean) {
+        withContext(Dispatchers.IO) {
+            bookDao.setInLibrary(listOf(bookUrl), inLibrary)
         }
     }
 }

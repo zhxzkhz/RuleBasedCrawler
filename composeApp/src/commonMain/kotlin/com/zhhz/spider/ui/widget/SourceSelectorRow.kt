@@ -32,7 +32,7 @@ fun SourceSelectorRow(sources:  List<SearchBookSource>, currentSource: SearchBoo
         Text("选择来源:", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
 
         LazyRow(Modifier.weight(1f).padding(start = 8.dp)) {
-            items(sources) { source ->
+            items(sources, key = { "${it.ruleId}|${it.url}" }) { source ->
                 val isSelected = source.ruleId == currentSource?.ruleId
                 SuggestionChip(
                     onClick = { onSourceSelected(source) },

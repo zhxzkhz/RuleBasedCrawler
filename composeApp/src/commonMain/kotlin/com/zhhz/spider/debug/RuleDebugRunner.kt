@@ -151,7 +151,41 @@ object RuleDebugRunner {
             3 -> taskRunner.fetch(rule, rule.detail, input, ctx)
             4 -> taskRunner.fetch(rule, rule.catalog, input, ctx)
             5 -> taskRunner.fetch(rule, rule.content, input, ctx)
-            6 -> taskRunner.fetch(rule, rule.explore, input, ctx)
+            // 💡 发现页调试：
+            // ① 输入框填了地址 → 直接抓该地址（测试某个具体分类的列表页）
+            // ② 输入为空 → 先执行静态分类生成；失败则直接报出脚本错误，不再误抓首页
+            // ③ 静态成功 → 自动取第一个分类的地址验证列表抓取与解析
+            // ④ 都没有 → 回退入口页（urlSelector 模板或书源主页）
+            6 -> {
+                if (input.isNotBlank()) {
+                    taskRunner.fetch(rule, rule.explore, input, ctx)
+                } else {
+                    val staticTabs = ExploreTabResolver.resolveStatic(rule, ctx)
+                    if (staticTabs.isEmpty() &&
+                        (rule.explore.fixedTabs.any { it.title.isNotBlank() && it.url.isNotBlank() } ||
+                                !rule.explore.tabsScript.isNullOrBlank())
+                    ) {
+                        return NetworkDebugResult(
+                            html = "静态分类生成失败：${ExploreTabResolver.lastEvalError ?: "返回为空"}\n" +
+                                    "修复脚本后再测试列表抓取。",
+                            localResult = LocalDebugResult("静态分类生成失败", emptyList()),
+                            isError = true
+                        )
+                    }
+                    val entryUrl = staticTabs.firstOrNull()?.url
+                        ?: rule.explore.getExploreUrl(rule.url, ctx).ifBlank { rule.url }
+                    taskRunner.fetch(rule, rule.explore, entryUrl, ctx)
+                }
+            }
+            // 💡 评论页：输入为空时用书籍详情 URL 生成评论地址（{{key}} 模板）
+            7 -> {
+                val commentUrl = if (input.isNotBlank()) {
+                    input
+                } else {
+                    rule.comment.getCommentUrl(ctx["bookUrl"] ?: rule.url, ctx)
+                }
+                taskRunner.fetch(rule, rule.comment, commentUrl, ctx)
+            }
             else -> ""
         }
 
@@ -213,9 +247,9 @@ object RuleDebugRunner {
                     val cover = traceString("DetailPage.bookCoverSelector", html, detail.bookCoverSelector, ctx, traces)
                     val labels = traceList("DetailPage.bookLabelSelector", html, detail.bookLabelSelector, ctx, traces)
                     val catalogUrl = traceString("DetailPage.catalogUrlSelector", html, detail.catalogUrlSelector, ctx, traces)
-
+                    val  description = traceString("DetailPage.bookIntroSelector", html, detail.bookIntroSelector, ctx, traces)
                     log.appendLine("√ 书本详细")
-                    log.appendLine("书名：${name}\n作者：$author\n封面：$cover\n标签：$labels")
+                    log.appendLine("书名：${name}\n作者：$author\n封面：$cover\n标签：$labels\n简介：$description")
                     log.appendLine("书本章节URL -> $catalogUrl")
                 }
 
@@ -245,15 +279,26 @@ object RuleDebugRunner {
                     if (staticTabs.isNotEmpty()) {
                         log.appendLine("√ 静态/脚本分类 ${staticTabs.size} 个")
                         staticTabs.forEach { log.appendLine(" • ${it.title} >> ${it.url}") }
+                    } else if (explore.fixedTabs.any { it.title.isNotBlank() && it.url.isNotBlank() } ||
+                        !explore.tabsScript.isNullOrBlank()
+                    ) {
+                        log.appendLine("⚠ 固定分类/JS 脚本已配置但未生成任何有效分类")
+                        log.appendLine("  原因：${ExploreTabResolver.lastEvalError ?: "返回为空"}")
+                        log.appendLine("  JS 返回值必须是 [{group,title,url}] 对象数组，且 title/url 非空")
                     }
 
                     if (explore.tabsSelector.steps.isNotEmpty()) {
                         val tabs = traceList("ExplorePage.tabsSelector", html, explore.tabsSelector, ctx, traces)
                         log.appendLine("√ 找到 ${tabs.size} 个分类")
-                        tabs.take(5).forEach {
+                        tabs.take(8).forEach {
                             val name = traceString("ExplorePage.tabNameSelector", it, explore.tabNameSelector, ctx, traces)
                             val url = traceString("ExplorePage.tabUrlSelector", it, explore.tabUrlSelector, ctx, traces)
-                            log.appendLine(" • $name >> $url")
+                            if (explore.tabGroupSelector.steps.isNotEmpty()) {
+                                val group = traceString("ExplorePage.tabGroupSelector", it, explore.tabGroupSelector, ctx, traces)
+                                log.appendLine(" • [$group] $name >> $url")
+                            } else {
+                                log.appendLine(" • $name >> $url")
+                            }
                         }
                     }
 
@@ -272,6 +317,42 @@ object RuleDebugRunner {
                             log.appendLine(" • 书名：$name\n\t\t\t作者：$author\n\t\t\t详细地址：$detailUrl")
                         }
                     }
+                }
+
+                7 -> {
+                    val comment = rule.comment
+                    val comments = traceList("CommentPage.listSelector", html, comment.listSelector, ctx, traces)
+                    log.appendLine("√ 找到 ${comments.size} 条评论")
+
+                    // 💡 递归输出评论 + 楼中楼（与仓库层平铺逻辑一致）
+                    fun appendCommentItem(item: Any, depth: Int) {
+                        val user = traceString("CommentPage.userSelector", item, comment.userSelector, ctx, traces)
+                        val content = traceString("CommentPage.contentSelector", item, comment.contentSelector, ctx, traces)
+                        val time = if (comment.timeSelector.steps.isNotEmpty()) {
+                            traceString("CommentPage.timeSelector", item, comment.timeSelector, ctx, traces)
+                        } else ""
+                        val score = if (comment.scoreSelector.steps.isNotEmpty()) {
+                            traceString("CommentPage.scoreSelector", item, comment.scoreSelector, ctx, traces)
+                        } else ""
+
+                        val indent = "    ".repeat(depth)
+                        val head = buildString {
+                            append(indent)
+                            append(if (depth > 0) "↳ " else "• ")
+                            append(user)
+                            if (score.isNotBlank()) append(" ($score)")
+                            if (time.isNotBlank()) append("  $time")
+                        }
+                        log.appendLine(head)
+                        log.appendLine("$indent\t\t\t$content")
+
+                        if (comment.replyListSelector.steps.isNotEmpty()) {
+                            val replies = traceList("CommentPage.replyListSelector", item, comment.replyListSelector, ctx, traces)
+                            replies.forEach { appendCommentItem(it, depth + 1) }
+                        }
+                    }
+
+                    comments.take(5).forEach { appendCommentItem(it, 0) }
                 }
             }
         } catch (e: Exception) {

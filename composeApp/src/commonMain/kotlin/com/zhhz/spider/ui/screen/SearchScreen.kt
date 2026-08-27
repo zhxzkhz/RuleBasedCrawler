@@ -4,11 +4,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.zhhz.spider.DetailRoute
 import com.zhhz.spider.network.toDomain
 import com.zhhz.spider.ui.widget.SearchResultItem
@@ -92,6 +95,41 @@ fun SearchScreen(
                     }
                 )
 
+                // 💡 搜索历史：空关键词时展示，点击直接重搜
+                if (uiState.searchHistory.isNotEmpty() && uiState.keyword.isBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "搜索历史",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = { viewModel.processIntent(SearchUiIntent.ClearSearchHistory) },
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Text("清除", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    androidx.compose.foundation.lazy.LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(uiState.searchHistory, key = { it }) { keyword ->
+                            AssistChip(
+                                onClick = {
+                                    viewModel.processIntent(SearchUiIntent.UpdateKeyword(keyword))
+                                    viewModel.processIntent(SearchUiIntent.ExecuteSearch)
+                                },
+                                label = { Text(keyword, maxLines = 1) }
+                            )
+                        }
+                    }
+                }
+
                 AnimatedVisibility(visible = uiState.isSearchOngoing) {
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth(),
@@ -114,12 +152,27 @@ fun SearchScreen(
                     modifier = Modifier.align(Alignment.Center)
                 )
             } else if (uiState.searchResults.isNotEmpty()) {
+                val listState = rememberLazyListState()
+
+                // 触底自动翻页：距底部不足 3 项时触发 LoadMore（ViewModel 内部有防重入守卫）
+                LaunchedEffect(listState, uiState.searchResults.size) {
+                    snapshotFlow {
+                        val info = listState.layoutInfo
+                        (info.visibleItemsInfo.lastOrNull()?.index ?: 0) to info.totalItemsCount
+                    }.collect { (lastVisibleIndex, totalItemsCount) ->
+                        if (totalItemsCount > 0 && lastVisibleIndex >= totalItemsCount - 3) {
+                            viewModel.processIntent(SearchUiIntent.LoadMore)
+                        }
+                    }
+                }
+
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(uiState.searchResults) { book -> // book 此时是 SearchBook
+                    items(uiState.searchResults, key = { "${it.title}|${it.author}" }) { book -> // book 此时是 SearchBook
                         SearchResultItem(
                             book = book,
                             onClick = {
@@ -132,6 +185,23 @@ fun SearchScreen(
                                 viewModel.processIntent(SearchUiIntent.AddToBookshelf(book.toDomain()))
                             }
                         )
+                    }
+
+                    // 底部加载更多指示器
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            when {
+                                uiState.isLoadMore -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                !uiState.hasMore -> Text(
+                                    "没有更多了",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             } else if (uiState.hasSearched) {

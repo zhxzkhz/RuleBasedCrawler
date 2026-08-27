@@ -19,15 +19,104 @@ class FetchTaskRunner(
 ) {
 
 
-    suspend fun fetchWithSession(source : SourceRule, page: IPage, input: String, ctx: VariableContext): String {
+    /**
+     * 💡 为 JS 脚本层创建动态 Header 签名器：
+     * 与 buildRequest 相同的逻辑——先模板渲染全局静态头，再执行 headerScript 得到签名头。
+     * 供 ExploreTabResolver 等场景挂载到 JsExtensionClass，
+     * 使脚本内 java.ajax(url) 自动携带与管线一致的动态签名。
+     */
+    fun createJsHeaderSigner(source: SourceRule, ctx: VariableContext): (String) -> Map<String, String> {
+        return { url ->
+            val result = LinkedHashMap<String, String>()
+            // 1. 全局静态头（值支持 {{var}} 模板）
+            source.globalConfig.headers.forEach { (k, v) ->
+                result[k] = RuleParser.resolveTemplate(v, url, ctx)
+            }
+            // 2. 执行全局 headerScript（返回 JSON 字符串形式的头集合）
+            val script = source.globalConfig.headerScript
+            if (!script.isNullOrBlank()) {
+                try {
+                    val bindings = SimpleBindings()
+                    bindings["java"] = JsExtensionClass
+                    bindings["java_url"] = url
+                    bindings["java_source"] = source
+                    bindings["java_ctx"] = ctx
+                    bindings["java_log"] = logger
+                    bindings["value"] = url
 
+                    val jsonResult = JsEngineRunner.eval(source.id, script, bindings)
+                    JSON.parseObject(jsonResult.toString(), Map::class.java).let { dynamic ->
+                        dynamic.forEach { (k, v) ->
+                            if (k != null && v != null) result[k.toString()] = v.toString()
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error(e) { "JS ajax 签名头生成失败 source=${source.name.ifBlank { source.id }} id=${source.id} url=$url" }
+                }
+            }
+            result
+        }
+    }
+
+    /**
+     * 💡 为 JS 脚本层创建响应处理器：与管线 responseScript 逻辑一致
+     * （bindings.value=原始响应 → 执行脚本 → jsToJavaObject 后转字符串）。
+     * 供脚本内 java.processResponse(raw[, url]) 调用；绑定与管线对齐，
+     * 包含 java_request / java_source 等，responseScript 内可正常引用。
+     */
+    fun createJsResponseProcessor(
+        source: SourceRule,
+        ctx: VariableContext,
+        headerProvider: ((String) -> Map<String, String>)? = null
+    ): (String, String, Map<String, String>?) -> String {
+        return { raw, requestUrl, sentHeaders ->
+            val script = source.globalConfig.responseScript
+            if (script.isNullOrBlank()) {
+                raw
+            } else {
+                try {
+                    val effectiveUrl = requestUrl.ifBlank { ctx["bookUrl"].orEmpty().ifBlank { source.url } }
+                    val bindings = SimpleBindings()
+                    bindings["java"] = JsExtensionClass
+                    bindings["java_url"] = effectiveUrl
+                    bindings["java_source"] = source
+                    bindings["java_ctx"] = ctx
+                    bindings["java_log"] = logger
+                    bindings["value"] = raw
+                    bindings["data"] = raw
+
+                    // 💡 java_request.headers 优先使用发送时快照（与请求严格配对），
+                    // 其次签名器重新生成，最后退回全局静态头
+                    val actualHeaders = sentHeaders
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: runCatching { headerProvider?.invoke(effectiveUrl) }
+                            .getOrNull()
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: source.globalConfig.headers
+                    bindings["java_request"] = com.zhhz.spider.network.FetchRequest(
+                        url = effectiveUrl,
+                        keyword = ctx["keyword"].orEmpty(),
+                        headers = actualHeaders
+                    )
+
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(source.id, script, bindings)).toString()
+                } catch (e: Exception) {
+                    logger.error(e) { "JS 响应脚本执行失败 source=${source.name.ifBlank { source.id }} id=${source.id}" }
+                    raw
+                }
+            }
+        }
+    }
+
+    suspend fun fetchWithSession(source : SourceRule, page: IPage, input: String, ctx: VariableContext): String {
         // 1. 从数据库读取持久化的会话
         val session = dao.getSession(source.id)
 
         // 2. 检查是否逻辑失效 (根据时间)
         val isExpired = session != null && session.expireAt > 0 && System.currentTimeMillis() > session.expireAt
 
-        logger.info { "Fetching ${source.id}: $session" }
+        // 💡 只记录会话状态，不输出 token 明文（避免日志泄漏凭证）
+        logger.info { "Session 检查 source=${source.id} 存在=${session != null} 已过期=$isExpired" }
 
         if (session == null || isExpired) {
             // 3. 如果没登录或已过期，触发自动化登录逻辑
@@ -122,6 +211,22 @@ class FetchTaskRunner(
         bindings["java_log"] = logger
         bindings["value"] = input
 
+        // 💡 预绑定请求信息（签名头尚未合并），headerScript 里可读取 url/method/headers 等；
+        // 脚本执行完成后会用带签名的最终请求对象覆盖此绑定，供 responseScript 使用
+        val preRequest = FetchRequest(
+            url = finalUrl,
+            keyword = input,
+            method = method.uppercase(),
+            charset = charset,
+            isCache = source.useCache,
+            headers = finalHeaders,
+            body = finalBody,
+            isJson = isJson,
+            proxy = null,
+            customDns = source.customDns
+        )
+        bindings["java_request"] = preRequest
+
 
         // 2. 执行动态 Header 脚本
         val script = local.headerScript ?: global.headerScript
@@ -130,7 +235,7 @@ class FetchTaskRunner(
             var jsonResult: Any?
             try {
                 // 执行 JS，约定脚本返回一个 JSON 字符串，例如: '{"Token": "abc", "Time": "123"}'
-                jsonResult = JsEngineRunner.eval(script, bindings)
+                jsonResult = JsEngineRunner.eval(source.id, script, bindings)
                 logger.debug { "JSON RESULT: $jsonResult" }
                 // 解析并合并到请求头中
                 val dynamicHeaders = JSON.parseObject(jsonResult.toString(), Map::class.java) as Map<*, *>
@@ -159,17 +264,10 @@ class FetchTaskRunner(
             }
         }
 
-        // 5. 最终构造请求对象
-        val req = FetchRequest(
-            url = finalUrl,
-            method = method.uppercase(),
-            charset = charset,
-            isCache = source.useCache,
+        // 5. 最终构造请求对象（合并签名头后的版本，覆盖预绑定供后续脚本使用）
+        val req = preRequest.copy(
             headers = finalHeaders,
-            body = finalBody,
-            isJson = isJson,
-            proxy = proxy,
-            customDns = source.customDns
+            proxy = proxy
         )
         bindings["java_request"] = req
 
@@ -188,7 +286,7 @@ class FetchTaskRunner(
             // 调用 JS 引擎执行解密
             // 约定：输入变量名为 'raw'，输出为脚本最后一行或 return 值
             try {
-                rawResponse = JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(responseScript, bindings)).toString()
+                rawResponse = JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(source.id, responseScript, bindings)).toString()
             } catch (e: Exception) {
                 logger.error(e) {
                     "响应脚本执行失败 source=${source.name.ifBlank { source.id }} id=${source.id} page=${page.pageName()} url=$finalUrl"

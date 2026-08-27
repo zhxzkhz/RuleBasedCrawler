@@ -25,4 +25,7 @@ interface ReaderRepository {
         chapterTitle: String,
         chapterUrl: String?
     )
+
+    /** 标记某章已读（打开章节内容成功后调用） */
+    suspend fun markChapterRead(bookUrl: String, chapterUrl: String)
 }

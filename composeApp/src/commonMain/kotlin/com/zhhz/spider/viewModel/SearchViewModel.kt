@@ -25,7 +25,8 @@ class SearchViewModel(
     private val searchRepository: SearchRepository,
     private val sessionRepository: SessionRepository,
     private val ruleRepository: RuleRepository,
-    private val detailRepository: DetailRepository
+    private val detailRepository: DetailRepository,
+    private val settingsRepository: com.zhhz.spider.settings.SettingsRepository
 ) : BaseViewModel<SearchUiState, SearchUiIntent, SearchUiEffect>(
     initialState = SearchUiState()
 ) {
@@ -35,6 +36,8 @@ class SearchViewModel(
     private var loadMoreJob: Job? = null
 
     init {
+        // 恢复搜索历史
+        updateState { copy(searchHistory = settingsRepository.loadBlocking().searchHistory) }
         viewModelScope.launch {
             ruleRepository.loadData().collect { rules ->
                 val availableRules = rules
@@ -75,6 +78,7 @@ class SearchViewModel(
             }
             is SearchUiIntent.SetIdSearch -> handleSetIdSearch(intent.enabled)
             is SearchUiIntent.ExecuteSearch -> handleExecuteSearch()
+            is SearchUiIntent.ClearSearchHistory -> handleClearSearchHistory()
             is SearchUiIntent.LoadMore -> handleLoadMore()
             is SearchUiIntent.AddToBookshelf -> handleAddToBookshelf(intent.book)
             is SearchUiIntent.BookClicked -> handleBookClicked(intent.book)
@@ -133,15 +137,34 @@ class SearchViewModel(
         }
     }
 
+    /** 搜索历史：去重置顶，最多保留 10 条，持久化到设置文件 */
+    private fun recordSearchHistory(keyword: String) {
+        val trimmed = keyword.trim()
+        if (trimmed.isEmpty()) return
+        val updated = (listOf(trimmed) + uiState.value.searchHistory.filter { it != trimmed }).take(10)
+        updateState { copy(searchHistory = updated) }
+        viewModelScope.launch {
+            runCatching { settingsRepository.save(settingsRepository.loadBlocking().copy(searchHistory = updated)) }
+        }
+    }
+
+    private fun handleClearSearchHistory() {
+        updateState { copy(searchHistory = emptyList()) }
+        viewModelScope.launch {
+            runCatching { settingsRepository.save(settingsRepository.loadBlocking().copy(searchHistory = emptyList())) }
+        }
+    }
+
     // 逻辑一：全新搜索
-    private fun handleExecuteSearch() {
-        val currentKeyword = uiState.value.keyword
+    private fun handleExecuteSearch() {        val currentKeyword = uiState.value.keyword
         val selectedRuleId = uiState.value.selectedRuleId
         val useIdSearch = uiState.value.isIdSearch
         if (currentKeyword.isBlank()) {
             sendEffect(SearchUiEffect.ShowToast("搜索关键字不能为空"))
             return
         }
+
+        recordSearchHistory(currentKeyword)
 
         // 1. 如果上一次搜索还没完，强制中断它！
         searchJob?.cancel()
@@ -248,6 +271,9 @@ class SearchViewModel(
 
         // 重点：冻结住第一页已有的数据
         val currentList = state.allSearchResults
+        // 💡 是否还有更多的判断依据：已加载书籍的聚合键与书源地址集合
+        val existingKeys = currentList.mapTo(mutableSetOf()) { "${it.title}|${it.author}" }
+        val existingUrls = currentList.flatMapTo(mutableSetOf()) { book -> book.sources.map { it.url } }
 
         loadMoreJob = viewModelScope.launch {
             searchRepository.fetchData(state.keyword, nextPage, state.searchedRuleId)
@@ -256,13 +282,20 @@ class SearchViewModel(
                     sendEffect(SearchUiEffect.ShowToast("加载失败: ${e.message}"))
                 }
                 .collect { newStreamingResults ->
+                    // 💡 去重检测：新页没有产出任何"新面孔"（返回空列表、或不支持翻页的
+                    // 规则原样重复第一页），即判定已到底；且只追加新书，不产生重复条目
+                    val freshBooks = newStreamingResults.filter { sb ->
+                        "${sb.title}|${sb.author}" !in existingKeys && sb.sources.any { it.url !in existingUrls }
+                    }
+                    val hasFresh = freshBooks.isNotEmpty()
+
                     updateState {
                         copy(
-                            // 拼装：第一页老数据 + 正在流式增长的第二页新数据
-                            allSearchResults = currentList + newStreamingResults,
+                            // 拼装：已有数据 + 本页新增的不重复结果
+                            allSearchResults = currentList + freshBooks,
                             isLoadMore = false, // 关掉底部的加载圈
                             page = nextPage,
-                            hasMore = newStreamingResults.isNotEmpty()
+                            hasMore = hasFresh
                         )
                     }
                 }
@@ -290,7 +323,6 @@ class SearchViewModel(
                 cover = book.cover,
                 url = defaultSource.url,
                 ruleId = defaultSource.ruleId,
-                lastReadChapterIndex = 0,
                 // 💡 核心修改：将所有的备用书源，完好无损地装入 Book 实体中！
                 availableSources = book.sources
             )
@@ -344,7 +376,10 @@ data class SearchUiState(
     val hasMore: Boolean = true,
 
     // 区分“尚未搜索”和“搜索结果为空”，避免输入时过早显示空状态
-    val hasSearched: Boolean = false
+    val hasSearched: Boolean = false,
+
+    // 💡 搜索历史（最多 10 条，新的在前）
+    val searchHistory: List<String> = emptyList()
 ) : UiState {
     // 单规则筛选时同步裁剪来源，保证详情和加入书架使用的也是当前规则
     val searchResults: List<SearchBook>
@@ -382,6 +417,9 @@ sealed class SearchUiIntent : UiIntent {
     data class SetPreciseSearch(val enabled: Boolean) : SearchUiIntent()
     data class SetIdSearch(val enabled: Boolean) : SearchUiIntent()
     data object ExecuteSearch : SearchUiIntent()
+
+    /** 清空搜索历史 */
+    data object ClearSearchHistory : SearchUiIntent()
     data object LoadMore : SearchUiIntent()
     data class AddToBookshelf(val book: Book) : SearchUiIntent()
 

@@ -227,9 +227,20 @@ object RuleParser {
                 bindings["value"] = item
                 bindings["data"] = item
                 bindings["root"] = root  // 【新增】根数据，JS 里可以用 root.xxx 访问原始 HTML
+                // 💡 选择器级脚本也可用的基础请求信息（取会话中的书籍地址），避免 ReferenceError
+                val requestUrl = ctx["bookUrl"].orEmpty()
+                bindings["java_url"] = requestUrl
+                bindings["java_request"] = com.zhhz.spider.network.FetchRequest(
+                    url = requestUrl,
+                    keyword = ctx["keyword"].orEmpty(),
+                    method = "GET"
+                )
 
                 try {
-                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(step.rule, bindings))
+                    // 💡 有书籍上下文时按 bookUrl 隔离引擎，避免与其他来源互相阻塞
+                    JsExtensionClass.jsToJavaObject(
+                        JsEngineRunner.eval(ctx["bookUrl"], step.rule, bindings)
+                    )
                 }  catch (e: ScriptException){
                     val errorDetail = """
                     JS执行失败！

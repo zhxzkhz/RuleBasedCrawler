@@ -23,4 +23,7 @@ interface DetailRepository {
     // 加入/移出 书架
     suspend fun saveData(book: Book)
     suspend fun deleteData(bookUrl: String)
+
+    /** 软移除/加回书架：只改 inLibrary 标记，保留章节目录与阅读进度 */
+    suspend fun setInLibrary(bookUrl: String, inLibrary: Boolean)
 }

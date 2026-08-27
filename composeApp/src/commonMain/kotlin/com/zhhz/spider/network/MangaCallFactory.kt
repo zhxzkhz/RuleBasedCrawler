@@ -47,13 +47,14 @@ class MangaCallFactory(
             bindings["java_ctx"] = ctx
             bindings["java_url"] = request.url.toString()
             bindings["java_source"] = rule
+            bindings["java_request"] = request
             bindings["request"] = request
             bindings["newRequestBuilder"] = newRequestBuilder
 
             // 如果有动态脚本(Js)，执行它以生成最新的 Header
             if (!it.globalConfig.headerScript.isNullOrBlank()) {
                 val dynamicHeaders =
-                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(it.globalConfig.headerScript!!, bindings))
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(it.id, it.globalConfig.headerScript!!, bindings))
                 if (dynamicHeaders is String) {
                     try {
                         JSON.parseObject(dynamicHeaders, Map::class.java).map { (key, value) ->
@@ -94,7 +95,7 @@ class MangaCallFactory(
         }
         if (!rule.globalConfig.headerScript.isNullOrBlank()) {
             val dynamicHeaders = JsExtensionClass.jsToJavaObject(
-                JsEngineRunner.eval(rule.globalConfig.headerScript!!, bindings)
+                JsEngineRunner.eval(rule.id, rule.globalConfig.headerScript!!, bindings)
             )
             if (dynamicHeaders is String) {
                 JSON.parseObject(dynamicHeaders, Map::class.java).forEach { (key, value) ->

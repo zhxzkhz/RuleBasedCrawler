@@ -81,11 +81,25 @@ class DecryptingFetcher(
                 bindings.put("java_ctx", ctx)
                 bindings.put("java_url", url)
                 bindings.put("java_log", logger)
+                bindings.put(
+                    "java_request",
+                    com.zhhz.spider.network.FetchRequest(url = url, keyword = ctx["bookUrl"].orEmpty())
+                )
+                // 💡 供 BitmapExt 内 eval 解密脚本时选择按书源隔离的引擎
+                bindings.put("__lockKey", ruleId)
                 bindings.put("bitmap", bitmap)
 
                 val decryptRule = rule.content.decryptImage
                 val detectedFormat = ImageFormatDetector.detectFormat(scrambledBytes)
-                bitmap.descrambleAndEncode(decryptRule, detectedFormat, bindings) ?: scrambledBytes
+                val result = bitmap.descrambleAndEncode(decryptRule, detectedFormat, bindings)
+
+                // 💡 规则声明了解密却失败时不再静默回退乱码原图，
+                // 抛错让 Coil 进入 Error 状态（阅读器显示"图片加载失败/重试"）
+                if (result == null) {
+                    logger.error { "图片解密失败 url=$url（详见解密脚本错误日志）" }
+                    throw Exception("图片解密失败，请重试或检查规则的解密脚本")
+                }
+                result
             }
 
             // 💡 4. 【核心大招】：由我们自己接管写盘，并强行向 journal 注册！

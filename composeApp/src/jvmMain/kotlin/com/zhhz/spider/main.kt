@@ -14,6 +14,9 @@ fun main() = application {
 
         state = WindowState(width = 920.dp, height = 760.dp,position = WindowPosition.Aligned(Alignment.Center))
     ) {
-        App()
+        // 安全剪贴板：Windows 下剪贴板被其它程序占用时不再崩溃退出
+        WithSafeClipboard {
+            App()
+        }
     }
 }

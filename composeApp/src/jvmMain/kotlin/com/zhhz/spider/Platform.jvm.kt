@@ -196,3 +196,6 @@ actual fun AndroidRuleEditorServerEffect() = Unit
 
 @Composable
 actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) = Unit
+
+@Composable
+actual fun VolumeKeyPageEffect(enabled: Boolean, onForward: () -> Unit, onBackward: () -> Unit) = Unit

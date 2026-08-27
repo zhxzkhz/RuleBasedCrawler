@@ -10,6 +10,7 @@ import com.zhhz.spider.network.SearchBookSource
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.DetailRepository
 import com.zhhz.spider.repository.RuleRepository
+import com.zhhz.spider.rule.supportsComments
 import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.ui.base.BaseViewModel
 import com.zhhz.spider.ui.base.UiEffect
@@ -24,7 +25,10 @@ class DetailViewModel(
     private val detailRepository: DetailRepository,
     private val catalogRepository: CatalogRepository,
     private val sessionRepository: SessionRepository,
-    private val ruleRepository: RuleRepository
+    private val ruleRepository: RuleRepository,
+    private val cleanupManager: com.zhhz.spider.manager.BookCleanupManager,
+    private val commentRepository: com.zhhz.spider.repository.CommentRepository,
+    private val downloadManager: com.zhhz.spider.manager.DownloadManager
 ) : BaseViewModel<DetailUiState, DetailUiIntent, DetailUiEffect>(
     initialState = DetailUiState()
 ) {
@@ -50,6 +54,111 @@ class DetailViewModel(
             is DetailUiIntent.ToggleBookshelf -> handleToggleBookshelf()
             is DetailUiIntent.GoToReader -> handleGoToReader()
             is DetailUiIntent.NavigateBack -> handleNavigateBack()
+            is DetailUiIntent.ToggleComments -> handleToggleComments(intent.show)
+            is DetailUiIntent.LoadMoreComments -> handleLoadMoreComments()
+            is DetailUiIntent.DownloadSelectedChapters -> handleDownloadSelectedChapters(intent.urls)
+        }
+    }
+
+    /**
+     * 选章下载：把勾选的章节丢给全局下载管理器做物理缓存。
+     */
+    private fun handleDownloadSelectedChapters(urls: List<String>) {
+        val source = uiState.value.currentSource
+        val bookUrl = source?.url
+        val ruleId = source?.ruleId ?: this.ruleId
+        if (bookUrl.isNullOrBlank() || urls.isEmpty()) {
+            sendEffect(DetailUiEffect.ShowToast("没有可下载的章节"))
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                downloadManager.downloadChapters(
+                    bookUrl = bookUrl,
+                    ruleId = ruleId,
+                    bookTitle = uiState.value.title,
+                    chapterUrls = urls
+                )
+                sendEffect(DetailUiEffect.ShowToast("已加入下载队列：${urls.size} 章"))
+            } catch (e: Exception) {
+                sendEffect(DetailUiEffect.ShowToast("加入下载队列失败: ${e.message}"))
+            }
+        }
+    }
+
+    /** 当前书源是否支持评论（决定详情页是否显示评论入口） */
+    fun supportsComments(): Boolean {
+        val source = uiState.value.currentSource ?: return false
+        return ruleRepository.getEnabledRules()
+            .find { it.id == source.ruleId }
+            ?.supportsComments() == true
+    }
+
+    private fun handleToggleComments(show: Boolean) {
+        updateState { copy(showComments = show) }
+        if (show && uiState.value.comments.isEmpty() && !uiState.value.isLoadingComments) {
+            loadCommentsInternal(page = 1)
+        }
+    }
+
+    private fun handleLoadMoreComments() {
+        val state = uiState.value
+        val source = state.currentSource ?: return
+        if (state.isLoadingComments || !state.hasMoreComments || state.comments.isEmpty()) return
+
+        // 💡 去重键：站点忽略页码原样重复时，没有新评论即判定到底
+        val knownKeys = state.comments.mapTo(mutableSetOf()) { "${it.user}|${it.content}|${it.time}" }
+        val nextPage = state.commentsPage + 1
+
+        updateState { copy(isLoadingComments = true) }
+
+        viewModelScope.launch {
+            try {
+                val newComments = commentRepository.fetchComments(source.ruleId, source.url, nextPage)
+                    .filter { c -> "${c.user}|${c.content}|${c.time}" !in knownKeys }
+
+                // 换源后丢弃过期响应
+                if (uiState.value.currentSource != source) return@launch
+
+                updateState {
+                    copy(
+                        comments = comments + newComments,
+                        commentsPage = nextPage,
+                        isLoadingComments = false,
+                        hasMoreComments = newComments.isNotEmpty()
+                    )
+                }
+            } catch (e: Exception) {
+                if (uiState.value.currentSource != source) return@launch
+                updateState { copy(isLoadingComments = false) }
+                sendEffect(DetailUiEffect.ShowToast("加载评论失败: ${e.message}"))
+            }
+        }
+    }
+
+    private fun loadCommentsInternal(page: Int) {
+        val state = uiState.value
+        val source = state.currentSource ?: return
+        val bookUrl = source.url
+
+        updateState { copy(isLoadingComments = true) }
+
+        viewModelScope.launch {
+            try {
+                val newComments = commentRepository.fetchComments(source.ruleId, bookUrl, page)
+                updateState {
+                    copy(
+                        comments = if (page == 1) newComments else comments + newComments,
+                        commentsPage = page,
+                        isLoadingComments = false,
+                        hasMoreComments = newComments.isNotEmpty()
+                    )
+                }
+            } catch (e: Exception) {
+                updateState { copy(isLoadingComments = false) }
+                sendEffect(DetailUiEffect.ShowToast("加载评论失败: ${e.message}"))
+            }
         }
     }
 
@@ -125,6 +234,9 @@ class DetailViewModel(
                         latestChapterTitle = localChapters.lastOrNull()?.title.orEmpty(),
                         catalogUrl = localDetail?.catalogUrl.orEmpty(),
                         labels = localDetail?.labels.orEmpty(),
+                        isInBookshelf = true,
+                        lastReadChapterIndex = localBook.lastReadChapterIndex,
+                        lastReadChapterTitle = localBook.lastReadChapterTitle,
                         isLoading = false,
                         isCatalogLoading = false,
                         chapters = localChapters
@@ -141,7 +253,9 @@ class DetailViewModel(
                 author = detailData.author.ifBlank { uiState.value.author },
                 cover = detailData.cover.ifBlank { uiState.value.cover },
                 url = detailUrl,
-                ruleId = ruleId
+                ruleId = ruleId,
+                lastReadChapterIndex = uiState.value.lastReadChapterIndex,
+                lastReadChapterTitle = uiState.value.lastReadChapterTitle
             )
             sessionRepository.saveData(updatedBook)
 
@@ -243,26 +357,27 @@ class DetailViewModel(
             try {
                 if (state.isInBookshelf) {
                     // 💡 情况 A：已经在书架，执行“移出书架”操作
-                    // 严格遵循规范命名：删除调用 deleteData
-                    detailRepository.deleteData(url)
-                    sendEffect(DetailUiEffect.ShowToast("已从书架中移出"))
+                    // 软移除：清图片磁盘缓存并停掉下载任务，保留章节目录与阅读进度（可在历史记录找回）
+                    cleanupManager.cleanup(url, clearTextCache = false)
+                    detailRepository.setInLibrary(url, false)
+                    sendEffect(DetailUiEffect.ShowToast("已移出书架（阅读历史中可找回）"))
                 } else {
                     // 💡 情况 B：不在书架，执行“加入书架”操作
-                    // 构建数据库需要的 BookEntity 实体
+                    // 构建数据库需要的 BookEntity 实体（首次加入，阅读进度保持未读状态）
                     val entity = Book(
                         url = url,
                         title = state.title,
                         author = state.author,
                         cover = state.cover,
-                        ruleId = ruleId,
-                        lastReadChapterTitle = state.latestChapterTitle
+                        ruleId = ruleId
                     )
 
                     // 严格遵循规范命名：保存调用 saveData
                     detailRepository.saveData(entity)
                     catalogRepository.saveData(url, state.chapters)
                     // 💡 加入书架时同步持久化详情信息（简介/标签/目录地址），供离线秒开
-                    if (state.desc.isNotBlank() && state.desc != "加载失败") {
+                    // 分类标签是书架筛选的数据源：只要抓到了标签就落库，即使简介异常
+                    if (state.labels.isNotEmpty() || (state.desc.isNotBlank() && state.desc != "加载失败")) {
                         detailRepository.saveDetailInfo(
                             url,
                             BookDetail(
@@ -314,8 +429,17 @@ data class DetailUiState(
     // --- 页面状态 ---
     val isLoading: Boolean = true,
     val isInBookshelf: Boolean = false,
+    val lastReadChapterIndex: Int = -1,
+    val lastReadChapterTitle: String = "",
     val chapters: List<Chapter> = emptyList(),
     val isCatalogLoading: Boolean = true,
+
+    // --- 评论 ---
+    val showComments: Boolean = false,
+    val comments: List<com.zhhz.spider.network.BookComment> = emptyList(),
+    val isLoadingComments: Boolean = false,
+    val commentsPage: Int = 1,
+    val hasMoreComments: Boolean = true
 ) : UiState
 
 // 2. 统一的意图
@@ -324,6 +448,10 @@ sealed class DetailUiIntent : UiIntent {
     data class LoadDetail(val detailUrl: String, val ruleId: String) : DetailUiIntent()
     // 手动刷新：强制走网络重新拉取详情与目录
     data object RefreshDetail : DetailUiIntent()
+    // 打开/关闭评论面板（首次打开自动加载第一页）
+    data class ToggleComments(val show: Boolean) : DetailUiIntent()
+    // 评论翻页
+    data object LoadMoreComments : DetailUiIntent()
     // 切换书源
     data class ChangeSource(val source: SearchBookSource) : DetailUiIntent()
     // 章节点击意图
@@ -332,6 +460,9 @@ sealed class DetailUiIntent : UiIntent {
     data object ToggleBookshelf : DetailUiIntent()
     // 点击开始阅读
     data object GoToReader : DetailUiIntent()
+
+    /** 选章下载：把勾选的章节加入后台下载队列 */
+    data class DownloadSelectedChapters(val urls: List<String>) : DetailUiIntent()
 
     data object NavigateBack : DetailUiIntent()
 }

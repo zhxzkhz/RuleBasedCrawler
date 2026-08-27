@@ -12,10 +12,20 @@ data class Book(
     val author: String,
     val cover: String,
     val ruleId: String,
-    val lastReadChapterTitle: String = "",
-    val lastReadChapterIndex: Int = 0,
+    val lastReadChapterTitle: String = "尚未开始",
+    val lastReadChapterIndex: Int = -1,
     val lastReadPageIndex: Int = 0,
     val inLibrary: Boolean = false,
+    // 分类/标签（逗号分隔），用于书架筛选
+    val category: String = "",
+    // 自定义分组位掩码（2,4,8,16...），一本书可同时属于多个分组；0=未分组
+    val groupFlags: Long = 0,
+    // 最后阅读时间（历史记录排序用）
+    val updateTime: Long = 0L,
+    // 总章节数（追更红点：计算未读章节数用）
+    val totalChapters: Int = 0,
+    // 加入书架时间（书架排序用）
+    val createTime: Long = 0L,
     val availableSources: List<SearchBookSource> = emptyList()
 )
 
@@ -40,15 +50,34 @@ data class SearchBook(
 data class Chapter(
     val index: Int,     // 章节的绝对序号（0, 1, 2...），非常关键
     val title: String,   // 章节标题
-    val url: String     // 抓取正文用的 URL
+    val url: String,     // 抓取正文用的 URL
+    // 是否已读（仅本地目录数据携带，规则抓取的原始目录默认 false）
+    val isRead: Boolean = false,
+    // 💡 新增：章节所属的卷名/分组名（默认空字符串代表无卷名）
+    val group: String = ""
 )
 
 /** 发现/榜单页的一个分类标签 */
 @Serializable
 data class ExploreTab(
     val title: String,
-    val url: String
+    val url: String,
+    val group: String = ""
 )
+
+/** 书籍的一条评论（楼中楼回复嵌套在 replys 中） */
+@Serializable
+data class BookComment(
+    val user: String,
+    val content: String,
+    val time: String = "",
+    val score: String = "",
+    val avatar: String = "",
+    val replys: List<BookComment> = emptyList()
+) {
+    /** 含回复的总条数 */
+    fun totalCount(): Int = 1 + replys.sumOf { it.totalCount() }
+}
 
 // 旧 Android Rhino 曾把 Java 集合包装器序列化为该对象，供缓存迁移使用。
 fun Chapter.hasLegacyInvalidTitle(): Boolean {
@@ -103,7 +132,9 @@ fun Book.toEntity() = BookEntity(
     lastReadChapterTitle = this.lastReadChapterTitle,
     lastReadChapterIndex = this.lastReadChapterIndex,
     lastReadPageIndex = this.lastReadPageIndex,
-    inLibrary = this.inLibrary
+    inLibrary = this.inLibrary,
+    category = this.category,
+    groupFlags = this.groupFlags
 )
 
 // 扩展函数：Domain 转化为 Data
@@ -112,6 +143,7 @@ fun Chapter.toEntity(bookUrl: String): ChapterEntity {
         bookUrl = bookUrl,
         indexNum = this.index,
         title = this.title,
-        url = this.url
+        url = this.url,
+        groupName = this.group
     )
 }

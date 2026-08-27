@@ -21,7 +21,7 @@ actual val platformModule = module {
         println("dbFile >> $dbFile")
         Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
             .setDriver(BundledSQLiteDriver())
-            .addMigrations(MIGRATION_3_4)
+            .addMigrations(MIGRATION_3_4, com.zhhz.spider.db.MIGRATION_7_8, com.zhhz.spider.db.MIGRATION_8_9, com.zhhz.spider.db.MIGRATION_9_10, com.zhhz.spider.db.MIGRATION_10_11)
             .fallbackToDestructiveMigration(true)
             .build()
     }

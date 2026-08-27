@@ -167,6 +167,13 @@ class ReaderRepositoryImpl(
         }
     }
 
+    override suspend fun markChapterRead(bookUrl: String, chapterUrl: String) {
+        if (bookUrl.isBlank() || chapterUrl.isBlank()) return
+        withContext(Dispatchers.IO) {
+            bookDao.markAsRead(bookUrl, chapterUrl)
+        }
+    }
+
     override suspend fun loadData(bookUrl: String): Book? {
         return withContext(Dispatchers.IO) {
             bookDao.getBookByUrl(bookUrl)?.toDomain()

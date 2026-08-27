@@ -22,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 
 private val logger = KotlinLogging.logger {}
@@ -30,14 +31,34 @@ class ReaderViewModel(
     private val readerRepository: ReaderRepository,
     private val catalogRepository: CatalogRepository,
     private val sessionRepository: SessionRepository,
-    private val ruleRepository: RuleRepository // 💡 新增：用于动态判断是不是漫画
+    private val ruleRepository: RuleRepository, // 💡 新增：用于动态判断是不是漫画
+    private val settingsRepository: com.zhhz.spider.settings.SettingsRepository
 ) : BaseViewModel<ReaderUiState, ReaderUiIntent, ReaderUiEffect>(
-    initialState = ReaderUiState()
+    initialState = ReaderUiState(settings = run {
+        // 启动时恢复上次阅读设置（字号/主题/漫画模式）
+        val saved = settingsRepository.loadBlocking()
+        ReaderSettings(
+            fontSize = saved.readerFontSize,
+            backgroundColor = saved.readerBackground,
+            textColor = saved.readerTextColor,
+            mangaMode = saved.readerMangaMode
+        )
+    })
 ) {
     companion object {
         private const val PRELOAD_COUNT = 5
         private const val MAX_RETRIES = 3
         private const val RETRY_DELAY_BASE_MS = 1000L
+    }
+
+    /** 最近一次持久化的应用设置（含阅读器），变更时整体写回 */
+    private var persistedSettings = settingsRepository.loadBlocking()
+
+    /** 更新内存缓存并异步落盘，避免阻塞 UI 线程 */
+    private fun persistSettings(transform: (com.zhhz.spider.settings.SettingsRepository.AppSettings) -> com.zhhz.spider.settings.SettingsRepository.AppSettings) {
+        persistedSettings = transform(persistedSettings)
+        val snapshot = persistedSettings
+        viewModelScope.launch { runCatching { settingsRepository.save(snapshot) } }
     }
 
     private var saveChapterIndex = 0
@@ -84,17 +105,20 @@ class ReaderViewModel(
             is ReaderUiIntent.ChangeFontSize -> {
                 updateState {
                     val newSize = (settings.fontSize + intent.delta).coerceIn(12, 36)
+                    persistSettings { it.copy(readerFontSize = newSize) }
                     copy(settings = settings.copy(fontSize = newSize))
                 }
             }
             is ReaderUiIntent.ChangeTheme -> {
                 updateState {
+                    persistSettings { it.copy(readerBackground = intent.background, readerTextColor = intent.text) }
                     copy(settings = settings.copy(backgroundColor = intent.background, textColor = intent.text))
                 }
             }
-            is ReaderUiIntent.ToggleImmersiveMode -> {
+            is ReaderUiIntent.ChangeMangaMode -> {
                 updateState {
-                    copy(settings = settings.copy(isImmersiveMode = !settings.isImmersiveMode))
+                    persistSettings { it.copy(readerMangaMode = intent.mode) }
+                    copy(settings = settings.copy(mangaMode = intent.mode))
                 }
             }
             is ReaderUiIntent.ReloadCurrentMangaChapter -> {
@@ -105,6 +129,7 @@ class ReaderViewModel(
                     )
                 }
             }
+            is ReaderUiIntent.RetryFetchChapter -> handleRetryFetchChapter(intent.chapterUrl, intent.index)
         }
     }
 
@@ -261,6 +286,11 @@ class ReaderViewModel(
                     return@launch
                 }
 
+                // 成功打开章节 → 标记已读（供目录页/追更红点使用）
+                viewModelScope.launch {
+                    runCatching { readerRepository.markChapterRead(uiState.value.bookUrl, url) }
+                }
+
                 // 预加载与修剪
                 preloadChaptersSerially(startIndex = index, ruleId = ruleId)
                 pruneChapterJobs(index)
@@ -289,6 +319,62 @@ class ReaderViewModel(
             fetchChapterContent(targetChapter.url, targetIndex, uiState.value.ruleId, isAppend = isAppend)
         } else {
             sendEffect(ReaderUiEffect.ShowToast("没有更多章节了"))
+        }
+    }
+
+    /**
+     * 重新获取某一章内容（空章节占位 UI 的"重新获取"按钮）。
+     * 只原位替换该章节块，不影响其它已加载章节与当前阅读位置；
+     * 同时丢弃内存中缓存的旧请求结果，强制走一次网络。
+     */
+    private fun handleRetryFetchChapter(url: String, index: Int) {
+        val state = uiState.value
+        if (state.retryingChapterIndex != -1) return // 已有重试在进行中
+
+        updateState { copy(retryingChapterIndex = index) }
+
+        viewModelScope.launch {
+            try {
+                // 关键：移除旧的 Deferred 缓存（空结果/失败结果），否则会拿到同样的空数据
+                chapterJobs.remove(url)?.cancel()
+
+                val block = withContext(Dispatchers.IO) {
+                    readerRepository.fetchData(url, state.ruleId, state.bookUrl)
+                }
+
+                val isMangaMode = state.bookType == BookType.image
+                val isEmpty = (isMangaMode && block.images.isEmpty()) || (!isMangaMode && block.text.isBlank())
+                val chapterTitle = state.catalogList.getOrNull(index)?.title ?: ""
+                val finalBlock = block.copy(
+                    chapterTitle = chapterTitle,
+                    chapterUrl = url,
+                    index = index,
+                    text = if (isEmpty) "本章未获取到任何内容，可能是源站异常或解析失败。" else block.text
+                )
+
+                updateState {
+                    copy(
+                        content = content.copy(
+                            blocks = content.blocks.map { if (it.index == index) finalBlock else it }
+                        ),
+                        retryingChapterIndex = -1
+                    )
+                }
+
+                if (isEmpty) {
+                    sendEffect(ReaderUiEffect.ShowToast("「$chapterTitle」重新获取后仍为空"))
+                } else {
+                    // 成功的结果放回缓存供后续复用；空结果不缓存以便再次重试
+                    chapterJobs[url] = viewModelScope.async(Dispatchers.IO) { finalBlock }
+                    sendEffect(ReaderUiEffect.ShowToast("「$chapterTitle」重新获取成功"))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                updateState { copy(retryingChapterIndex = -1) }
+                logger.error(e) { "重新获取章节失败 url=$url" }
+                sendEffect(ReaderUiEffect.ShowToast("重新获取失败: ${e.message}"))
+            }
         }
     }
 
@@ -406,7 +492,8 @@ data class ReaderSettings(
     val fontSize: Int = 18,
     val backgroundColor: Long = 0xFFFAF7F0,
     val textColor: Long = 0xFF333333,
-    val isImmersiveMode: Boolean = false
+    // 漫画阅读模式："webtoon" 条滑 / "paged" 翻页 / "rtl" 日漫右开
+    val mangaMode: String = "webtoon"
 )
 
 data class ReaderUiState(
@@ -432,6 +519,9 @@ data class ReaderUiState(
     val isMenuVisible: Boolean = false, // 点击屏幕中央显示的菜单状态
     val imageReloadVersion: Int = 0,
 
+    // 空章节"重新获取"进行中的章节索引（-1 = 无）
+    val retryingChapterIndex: Int = -1,
+
     val settings: ReaderSettings = ReaderSettings(),
     val isSettingsVisible: Boolean = false // 排版设置面板状态
 
@@ -447,7 +537,10 @@ sealed class ReaderUiIntent : UiIntent {
     object ToggleSettingsPanel : ReaderUiIntent()
     data class ChangeFontSize(val delta: Int) : ReaderUiIntent()
     data class ChangeTheme(val background: Long, val text: Long) : ReaderUiIntent()
-    object ToggleImmersiveMode : ReaderUiIntent()
+
+    /** 切换漫画阅读模式：webtoon / paged / rtl */
+    data class ChangeMangaMode(val mode: String) : ReaderUiIntent()
+
     object ReloadCurrentMangaChapter : ReaderUiIntent()
 
     // 切换章节
@@ -455,6 +548,9 @@ sealed class ReaderUiIntent : UiIntent {
     data object GoPrev : ReaderUiIntent()
 
     data class ChangeChapter(val index: Int) : ReaderUiIntent() // 💡 目录点击跳转意图
+
+    /** 空章节占位 UI：重新获取本章内容（强制走网络，原位替换） */
+    data class RetryFetchChapter(val chapterUrl: String, val index: Int) : ReaderUiIntent()
 
     // 交互切换
     data object ToggleMenu : ReaderUiIntent()

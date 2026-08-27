@@ -25,7 +25,19 @@ kotlin {
     }
     
     jvm()
-    
+
+    // 💡 依赖真实外网的"活体"测试默认排除，需要时 -Plive=true 运行
+    jvm {
+        @OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
+        testRuns["test"].executionTask.configure {
+            if (project.findProperty("live") != "true") {
+                useJUnit {
+                    excludeCategories("com.zhhz.spider.test.LiveNetworkTest")
+                }
+            }
+        }
+    }
+
     sourceSets {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)

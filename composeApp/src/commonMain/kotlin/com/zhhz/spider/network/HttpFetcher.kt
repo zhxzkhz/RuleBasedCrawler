@@ -1,5 +1,6 @@
 package com.zhhz.spider.network
 import com.zhhz.spider.rule.TagAction
+import com.zhhz.spider.util.JsExtensionClass
 import io.github.oshai.kotlinlogging.KotlinLogging
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -39,6 +40,12 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
             .addInterceptor(snapshotInterceptor)
             .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
             .build()
+    }
+
+    init {
+        // 💡 把带全局 CookieJar 的基础客户端共享给 JS 脚本层：
+        // 脚本里 java.ajax(url) 发出的请求自动继承/回存同域 Cookie
+        JsExtensionClass.attachSharedClient(baseClient)
     }
 
     fun fetch(sourceId: String, rate: Long, req: FetchRequest): String {

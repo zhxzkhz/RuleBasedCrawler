@@ -149,14 +149,14 @@ class TestServer(private val port: Int = 8080) {
                     }
                     call.respondText(html, ContentType.Text.Html)
                 }
-                // 5. 模拟发现/榜单入口页（分类标签）
+                // 5. 模拟发现/榜单入口页（分组分类标签）
                 get("/explore") {
                     val html = """
                     <html>
                     <body>
                         <div class="rank-tabs">
-                            <div class="tab-item"><a href="$baseUrl/rank/hot">热门榜</a></div>
-                            <div class="tab-item"><a href="$baseUrl/rank/new">新作榜</a></div>
+                            <div class="tab-item"><span class="tab-group">男生</span><a href="$baseUrl/rank/hot">热门榜</a></div>
+                            <div class="tab-item"><span class="tab-group">女生</span><a href="$baseUrl/rank/new">新作榜</a></div>
                         </div>
                     </body>
                     </html>
@@ -164,10 +164,15 @@ class TestServer(private val port: Int = 8080) {
                     call.respondText(html, ContentType.Text.Html)
                 }
 
-                // 6. 模拟分类榜单列表页
+                // 6. 模拟分类榜单列表页（支持 ?page= 翻页，第 2 页返回不同书目）
                 get("/rank/{tabId}") {
                     val tabId = call.parameters["tabId"] ?: ""
-                    val title = if (tabId == "hot") "《榜单热门第一》" else "《榜单新作第一》"
+                    val pageNo = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+                    val title = when {
+                        tabId != "hot" -> "《榜单新作第一》"
+                        pageNo <= 1 -> "《榜单热门第一》"
+                        else -> "《榜单热门第二页》"
+                    }
 
                     val html = """
                     <html>
@@ -183,6 +188,52 @@ class TestServer(private val port: Int = 8080) {
                     </html>
                 """.trimIndent()
                     call.respondText(html, ContentType.Text.Html)
+                }
+                // 7. 模拟书籍评论页
+                get("/comments") {
+                    val html = """
+                    <html>
+                    <body>
+                        <div class="comment-list">
+                            <div class="comment-item">
+                                <span class="comment-user">书友甲</span>
+                                <span class="comment-score">4.5分</span>
+                                <span class="comment-time">2024-01-01</span>
+                                <p class="comment-content">写得不错，追更中！</p>
+                            </div>
+                            <div class="comment-item">
+                                <span class="comment-user">书友乙</span>
+                                <p class="comment-content">前期节奏偏慢，后期渐入佳境。</p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                """.trimIndent()
+                    call.respondText(html, ContentType.Text.Html)
+                }
+
+                // 8. 模拟评论接口（JSON，含楼中楼回复）
+                get("/comments-json") {
+                    val json = """
+                        {"list":[
+                            {
+                                "CID":"10907382",
+                                "nickname":"海月薰",
+                                "addtime":"Aug 11, 2026",
+                                "content":"<div>比租借女友纯爱</div>",
+                                "replys":[
+                                    {
+                                        "CID":"10938094",
+                                        "nickname":"路人丙",
+                                        "addtime":"Aug 18, 2026",
+                                        "parent_CID":"10907382",
+                                        "content":"<div>明明就是纯爱</div>"
+                                    }
+                                ]
+                            }
+                        ]}
+                    """.trimIndent()
+                    call.respondText(json, ContentType.Application.Json)
                 }
             }
         }

@@ -1,5 +1,6 @@
 package com.zhhz.spider.rule
 
+import com.zhhz.spider.test.LiveNetworkTest
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,6 +10,7 @@ import java.net.Proxy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.experimental.categories.Category
 
 class NhentaiRuleFileTest {
     @Test
@@ -52,6 +54,7 @@ class NhentaiRuleFileTest {
     }
 
     @Test
+    @Category(LiveNetworkTest::class) // 依赖真实外网与本地代理，默认排除；-Plive=true 时运行
     fun liveApiWorksThroughLocalProxy() {
         val rule = loadRule()
         val client = OkHttpClient.Builder()

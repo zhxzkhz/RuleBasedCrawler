@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zhhz.spider.rule.ExploreFixedTab
 import com.zhhz.spider.rule.ExplorePage
+import com.zhhz.spider.rule.ExploreSortOption
 import org.jetbrains.compose.resources.painterResource
 import rulebasedcrawler.composeapp.generated.resources.*
 import com.zhhz.spider.ui.widget.FetchConfigEditor
@@ -38,15 +39,24 @@ fun ExploreRuleForm(
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
-        Text("固定分类/榜单（推荐）", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        Text("固定分类/榜单", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
         Text(
-            "分类地址固定时直接写在这里，无需配置入口页；与下方动态解析二选一",
+            "分类地址固定时直接写在这里；可与下方 JS 脚本同时使用（结果合并、按地址去重、固定分类在前）",
             style = MaterialTheme.typography.bodySmall,
             color = Color.Gray
         )
 
         exploreRule.fixedTabs.forEachIndexed { index, tab ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = tab.group,
+                    onValueChange = { newGroup ->
+                        onUpdate(exploreRule.copy(fixedTabs = exploreRule.fixedTabs.toMutableList().apply { set(index, tab.copy(group = newGroup)) }))
+                    },
+                    label = { Text("分组") },
+                    modifier = Modifier.weight(0.9f),
+                    singleLine = true
+                )
                 OutlinedTextField(
                     value = tab.title,
                     onValueChange = { newTitle ->
@@ -62,7 +72,7 @@ fun ExploreRuleForm(
                         onUpdate(exploreRule.copy(fixedTabs = exploreRule.fixedTabs.toMutableList().apply { set(index, tab.copy(url = newUrl)) }))
                     },
                     label = { Text("列表页地址") },
-                    modifier = Modifier.weight(2f),
+                    modifier = Modifier.weight(1.6f),
                     singleLine = true
                 )
                 TextButton(onClick = {
@@ -78,9 +88,49 @@ fun ExploreRuleForm(
             Text("+ 添加固定分类")
         }
 
+        // 排序选项：结果页出 Chip 切换，param 拼接到分类地址（自动处理 ?/&）
+        Text("排序选项（可选）", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            "如 \"?sort=hot\"、\"&o=0\"；拼接时自动处理 ?/& 分隔符，空参数表示默认排序",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray
+        )
+        exploreRule.sorts.forEachIndexed { index, sort ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = sort.title,
+                    onValueChange = { newTitle ->
+                        onUpdate(exploreRule.copy(sorts = exploreRule.sorts.toMutableList().apply { set(index, sort.copy(title = newTitle)) }))
+                    },
+                    label = { Text("名称") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = sort.param,
+                    onValueChange = { newParam ->
+                        onUpdate(exploreRule.copy(sorts = exploreRule.sorts.toMutableList().apply { set(index, sort.copy(param = newParam)) }))
+                    },
+                    label = { Text("参数") },
+                    modifier = Modifier.weight(1.4f),
+                    singleLine = true
+                )
+                TextButton(onClick = {
+                    onUpdate(exploreRule.copy(sorts = exploreRule.sorts.filterIndexed { i, _ -> i != index }))
+                }) {
+                    Text("删除", color = Color.Red)
+                }
+            }
+        }
+        TextButton(onClick = {
+            onUpdate(exploreRule.copy(sorts = exploreRule.sorts + ExploreSortOption()))
+        }) {
+            Text("+ 添加排序")
+        }
+
         // JS 脚本动态生成固定分类（如按日期/参数批量拼地址）
         ScriptSlot(
-            label = "或用 JS 脚本动态生成分类（返回 [{title,url}]）",
+            label = "或用 JS 脚本动态生成分类（返回 [{group,title,url}]）",
             script = exploreRule.tabsScript,
             icon = painterResource(Res.drawable.code_blocks_24px),
             onEdit = {
@@ -106,6 +156,9 @@ fun ExploreRuleForm(
         }
         SelectorEditor("分类链接 (Url)", exploreRule.tabUrlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "ExplorePage.tabUrlSelector"), onOpenJsEditor = onOpenJsEditor) {
             onUpdate(exploreRule.copy(tabUrlSelector = it))
+        }
+        SelectorEditor("分组标题 (可选，如 男生/女生)", exploreRule.tabGroupSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "ExplorePage.tabGroupSelector"), onOpenJsEditor = onOpenJsEditor) {
+            onUpdate(exploreRule.copy(tabGroupSelector = it))
         }
 
         Text("第二步：解析分类下的书籍列表", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))

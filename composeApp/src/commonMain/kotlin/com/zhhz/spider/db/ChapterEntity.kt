@@ -32,13 +32,17 @@ data class ChapterEntity(
     val title: String,         // 章节名
     val url: String,          // 章节正文地址
     val indexNum: Int,           // 章节排序（1, 2, 3...）
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
+    @androidx.room.ColumnInfo(defaultValue = "")
+    val groupName: String = "" // 💡 章节所属卷名
 )
 
 fun ChapterEntity.toDomain(): Chapter {
     return Chapter(
         index = this.indexNum,
         title = this.title,
-        url = this.url
+        url = this.url,
+        isRead = this.isRead,
+        group = this.groupName
     )
 }

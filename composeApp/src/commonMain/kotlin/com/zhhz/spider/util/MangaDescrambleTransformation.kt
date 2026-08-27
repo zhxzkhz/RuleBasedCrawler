@@ -45,7 +45,7 @@ class MangaDescrambleTransformation(
         if (rule.content.decryptImage.isNotBlank()) {
             try {
                 output =
-                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(rule.content.decryptImage, bindings)) as Bitmap
+                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(ruleId, rule.content.decryptImage, bindings)) as Bitmap
             } catch (e: ScriptException) {
                 val errorDetail = """
                 JS执行失败！

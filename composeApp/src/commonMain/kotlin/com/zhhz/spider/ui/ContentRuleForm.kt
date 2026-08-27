@@ -7,7 +7,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.zhhz.spider.rule.ContentPage
 import com.zhhz.spider.rule.ParseStep
 import com.zhhz.spider.rule.StepType
@@ -21,7 +23,7 @@ fun ContentRuleForm(contentRule: ContentPage?, highlightedSelectorName: String? 
         Button(onClick = { onUpdate(ContentPage()) }) { Text("+ 创建正文规则") }
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            FetchConfigEditor("详情页网络配置", contentRule.config,onOpenJsEditor = onOpenJsEditor) { onUpdate(contentRule.copy(config = it)) }
+            FetchConfigEditor("正文页网络配置", contentRule.config,onOpenJsEditor = onOpenJsEditor) { onUpdate(contentRule.copy(config = it)) }
             SelectorEditor("搜索地址 (可选)", contentRule.urlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "ContentPage.urlSelector"), onOpenJsEditor = onOpenJsEditor) {
                 onUpdate(contentRule.copy(urlSelector = it))
             }
@@ -32,6 +34,8 @@ fun ContentRuleForm(contentRule: ContentPage?, highlightedSelectorName: String? 
                 onUpdate(contentRule.copy(imageHeaders = it))
             }
 
+            // 💡 图片解密脚本：漫画混淆图还原（输入 bitmap，返回还原后的 bitmap）
+            Text("图片解密脚本（decryptImage）", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
 
             StepRow(
                 index = 0,

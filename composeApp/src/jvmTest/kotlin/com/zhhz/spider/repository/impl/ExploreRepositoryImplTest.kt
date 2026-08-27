@@ -1,10 +1,11 @@
-package com.zhhz.spider.repository.impl
+﻿package com.zhhz.spider.repository.impl
 
 import com.zhhz.spider.TestServer
 import com.zhhz.spider.db.RuleDao
 import com.zhhz.spider.db.RuleEntity
 import com.zhhz.spider.db.SessionEntity
 import com.zhhz.spider.manager.ContextSessionManager
+import com.zhhz.spider.network.ExploreTab
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.network.FileSnapshotInterceptor
 import com.zhhz.spider.network.HttpFetcher
@@ -42,6 +43,7 @@ class ExploreRepositoryImplTest {
                     tabsSelector = css(".tab-item", ExtractType.ELEMENT),
                     tabNameSelector = css("a"),
                     tabUrlSelector = css("a", ExtractType.ATTR, "href"),
+                    tabGroupSelector = css(".tab-group"),
                     listSelector = css(".book-item", ExtractType.ELEMENT),
                     nameSelector = css(".title"),
                     authorSelector = css(".author"),
@@ -58,8 +60,10 @@ class ExploreRepositoryImplTest {
             val tabs = repository.fetchTabs(rule.id)
             assertEquals(2, tabs.size)
             assertEquals("热门榜", tabs[0].title)
+            assertEquals("男生", tabs[0].group)
             assertEquals("${server.baseUrl}/rank/hot", tabs[0].url)
             assertEquals("新作榜", tabs[1].title)
+            assertEquals("女生", tabs[1].group)
 
             val books = repository.fetchBooks(rule.id, tabs[0].url)
             assertEquals(1, books.size)
@@ -135,9 +139,9 @@ class ExploreRepositoryImplTest {
                 ),
                 explore = ExplorePage(
                     fixedTabs = listOf(
-                        ExploreFixedTab(title = "热门榜", url = "${server.baseUrl}/rank/hot"),
+                        ExploreFixedTab(title = "热门榜", url = "${server.baseUrl}/rank/hot", group = "男生"),
                         ExploreFixedTab(title = " ", url = "https://ignored.example/blank"), // 无效项被过滤
-                        ExploreFixedTab(title = "新作榜", url = "${server.baseUrl}/rank/new")
+                        ExploreFixedTab(title = "新作榜", url = "${server.baseUrl}/rank/new", group = "女生")
                     )
                 )
             )
@@ -149,6 +153,7 @@ class ExploreRepositoryImplTest {
 
             val tabs = repository.fetchTabs(rule.id)
             assertEquals(listOf("热门榜", "新作榜"), tabs.map { it.title })
+            assertEquals(listOf("男生", "女生"), tabs.map { it.group })
 
             val books = repository.fetchBooks(rule.id, tabs[0].url)
             assertEquals(1, books.size)
@@ -206,6 +211,104 @@ class ExploreRepositoryImplTest {
         }
     }
 
+    @Test
+    fun fetchBooksResolvesPageTemplateForPagination() = runTest {
+        val server = TestServer(port = 18087).start()
+        try {
+            val rule = SourceRule(
+                id = "explore-page-rule",
+                name = "分页榜单书源",
+                url = "${server.baseUrl}/explore",
+                concurrentRate = 0,
+                useCache = false,
+                globalConfig = FetchConfig(headers = emptyMap()),
+                search = SearchPage(
+                    listSelector = css(".book-item", ExtractType.ELEMENT),
+                    nameSelector = css(".title"),
+                    authorSelector = css(".author"),
+                    coverSelector = css("img.cover", ExtractType.ATTR, "src"),
+                    detailUrlSelector = css("a.title", ExtractType.ATTR, "href")
+                ),
+                explore = ExplorePage(
+                    fixedTabs = listOf(
+                        ExploreFixedTab(title = "分页榜", url = "${server.baseUrl}/rank/hot?page={{page}}")
+                    )
+                )
+            )
+            val repository = ExploreRepositoryImpl(
+                contextSessionManager = ContextSessionManager(),
+                fetchTaskRunner = testRunner(),
+                ruleRepository = FakeExploreRuleRepository(listOf(rule))
+            )
+
+            val tabs = repository.fetchTabs(rule.id)
+            assertEquals(listOf("分页榜"), tabs.map { it.title })
+
+            // {{page}} 模板按页码替换，返回不同页的书目
+            val page1 = repository.fetchBooks(rule.id, tabs[0].url, page = 1)
+            assertEquals("《榜单热门第一》", page1.single().title)
+
+            val page2 = repository.fetchBooks(rule.id, tabs[0].url, page = 2)
+            assertEquals("《榜单热门第二页》", page2.single().title)
+
+            // 无模板的地址不受页码影响
+            val staticTabs = listOf(ExploreTab(title = "静态榜", url = "${server.baseUrl}/rank/hot"))
+            val again = repository.fetchBooks(rule.id, staticTabs[0].url, page = 5)
+            assertEquals("《榜单热门第一》", again.single().title)
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun fixedTabsAndScriptMergeDedupByUrlWithFixedFirst() = runTest {
+        val server = TestServer(port = 18089).start()
+        try {
+            val baseUrl = server.baseUrl
+            val rule = SourceRule(
+                id = "explore-merge-rule",
+                name = "合并榜单书源",
+                url = "${server.baseUrl}/explore",
+                concurrentRate = 0,
+                useCache = false,
+                globalConfig = FetchConfig(headers = emptyMap()),
+                search = SearchPage(
+                    listSelector = css(".book-item", ExtractType.ELEMENT),
+                    nameSelector = css(".title"),
+                    authorSelector = css(".author"),
+                    coverSelector = css("img.cover", ExtractType.ATTR, "src"),
+                    detailUrlSelector = css("a.title", ExtractType.ATTR, "href")
+                ),
+                explore = ExplorePage(
+                    // 固定分类与 JS 脚本同时存在：合并、URL 去重、固定在前
+                    fixedTabs = listOf(
+                        ExploreFixedTab(title = "热门榜", url = "$baseUrl/rank/hot", group = "男生")
+                    ),
+                    tabsScript = """
+                        var tabs = [];
+                        tabs.push({ title: '重复榜', url: '$baseUrl/rank/hot' });
+                        tabs.push({ group: '女生', title: '新作榜', url: '$baseUrl/rank/new' });
+                        tabs;
+                    """.trimIndent()
+                )
+            )
+            val repository = ExploreRepositoryImpl(
+                contextSessionManager = ContextSessionManager(),
+                fetchTaskRunner = testRunner(),
+                ruleRepository = FakeExploreRuleRepository(listOf(rule))
+            )
+
+            val tabs = repository.fetchTabs(rule.id)
+            assertEquals(listOf("热门榜", "新作榜"), tabs.map { it.title })
+            assertEquals(listOf("男生", "女生"), tabs.map { it.group })
+
+            val books = repository.fetchBooks(rule.id, tabs[1].url)
+            assertEquals("《榜单新作第一》", books.single().title)
+        } finally {
+            server.stop()
+        }
+    }
+
     private fun testRunner(): FetchTaskRunner {
         val cacheDir = Files.createTempDirectory("explore-repository-test-cache").toFile()
         return FetchTaskRunner(HttpFetcher(FileSnapshotInterceptor(cacheDir)), FakeExploreRuleDao())
@@ -224,6 +327,8 @@ private class FakeExploreRuleRepository(
     private val rules: List<SourceRule>
 ) : RuleRepository {
     override fun loadData(): Flow<List<RuleEntity>> = flowOf(emptyList())
+    override suspend fun syncRuleSubscription(url: String) = com.zhhz.spider.repository.RuleSubscriptionResult(0, 0, 0, "not implemented")
+
     override fun getEnabledRules(): List<SourceRule> = rules
     override suspend fun saveData(rule: RuleEntity) = Unit
     override suspend fun deleteData(rule: RuleEntity) = Unit

@@ -43,7 +43,10 @@ class CatalogRepositoryImpl(
                 Chapter(
                     index = index,
                     title = rule.catalog.getChapterName(chapter, ctx).trim(),
-                    url = rule.catalog.getChapterUrl(chapter, ctx).trim()
+                    url = rule.catalog.getChapterUrl(chapter, ctx).trim(),
+                    group = if (rule.catalog.chapterGroupSelector.steps.isNotEmpty()) {
+                        rule.catalog.getChapterGroup(chapter, ctx).trim()
+                    } else ""
                 )
             }
         }
@@ -85,7 +88,8 @@ class CatalogRepositoryImpl(
                             title = bean.title,
                             url = bean.url,
                             // 索引接着本地的末尾往后排：N + 0, N + 1...
-                            indexNum = localCount + index
+                            indexNum = localCount + index,
+                            groupName = bean.group
                         )
                     }
 
@@ -111,7 +115,8 @@ class CatalogRepositoryImpl(
                             title = bean.title,
                             url = bean.url,
                             indexNum = index,
-                            isRead = readStateByIndex[index] ?: false
+                            isRead = readStateByIndex[index] ?: false,
+                            groupName = bean.group
                         )
                     }
                     chapterDao.saveCatalog(bookUrl, entities)

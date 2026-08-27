@@ -3,6 +3,10 @@ package com.zhhz.spider.di
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.zhhz.spider.db.AppDatabase
+import com.zhhz.spider.db.MIGRATION_7_8
+import com.zhhz.spider.db.MIGRATION_8_9
+import com.zhhz.spider.db.MIGRATION_9_10
+import com.zhhz.spider.db.MIGRATION_10_11
 import com.zhhz.spider.remote.AndroidRuleEditorServer
 import com.zhhz.spider.util.BookPackager
 import okio.Path.Companion.toOkioPath
@@ -19,6 +23,7 @@ actual val platformModule = module {
         val dbFile = context.getDatabasePath("spider.db")
         Room.databaseBuilder<AppDatabase>(context, dbFile.absolutePath)
             .setDriver(BundledSQLiteDriver())
+            .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
             .fallbackToDestructiveMigration(true)
             .build()
     }

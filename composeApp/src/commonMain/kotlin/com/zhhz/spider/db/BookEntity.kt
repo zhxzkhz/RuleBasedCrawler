@@ -56,6 +56,11 @@ data class BookEntity(
     @ColumnInfo(defaultValue = "0")
     val totalChapters: Int = 0,        // 总章节数（用于展示进度百分比 10/100）
 
+    // ----------------- 6. 自定义分组（位掩码，可多选） -----------------
+    // 每个分组占一个 bit（2,4,8,16...），一本书可同时属于多个分组；0 = 未分组
+    @ColumnInfo(defaultValue = "0")
+    val groupFlags: Long = 0,
+
     // ----------------- 5. 时间戳记录 -----------------
     val createTime: Long = System.currentTimeMillis(), // 首次加入书架的时间
     var updateTime: Long = System.currentTimeMillis()  // 最后阅读/更新时间（决定书架排序）
@@ -70,5 +75,10 @@ fun BookEntity.toDomain() = Book(
     lastReadChapterTitle = this.lastReadChapterTitle,
     lastReadChapterIndex = this.lastReadChapterIndex,
     lastReadPageIndex = this.lastReadPageIndex,
-    inLibrary = this.inLibrary
+    inLibrary = this.inLibrary,
+    category = this.category,
+    groupFlags = this.groupFlags,
+    updateTime = this.updateTime,
+    totalChapters = this.totalChapters,
+    createTime = this.createTime
 )

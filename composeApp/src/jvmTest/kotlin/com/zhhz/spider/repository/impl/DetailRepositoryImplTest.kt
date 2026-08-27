@@ -1,4 +1,4 @@
-package com.zhhz.spider.repository.impl
+﻿package com.zhhz.spider.repository.impl
 
 import com.zhhz.spider.TestServer
 import com.zhhz.spider.db.BookDao
@@ -103,6 +103,27 @@ class DetailRepositoryImplTest {
         assertEquals("原标题", local.title)
         assertEquals("原作者", local.author)
 
+        // 第二次保存：标签与简介为空时，保留数据库已有值（合并语义）
+        repository.saveDetailInfo(
+            book.detailUrl,
+            BookDetail(
+                url = book.detailUrl,
+                title = "",
+                author = "",
+                cover = "",
+                desc = "",
+                status = "",
+                latestChapterTitle = "",
+                catalogUrl = "",
+                labels = emptyList()
+            )
+        )
+        val merged = repository.loadLocalDetail(book.detailUrl)
+        assertTrue(merged != null)
+        assertEquals(listOf("热血", "冒险"), merged.labels)
+        assertEquals("测试简介", merged.desc)
+        assertEquals("https://example.com/book/1/catalog", merged.catalogUrl)
+
         // 未收藏过的书不会因浏览详情而生成记录
         repository.saveDetailInfo(
             "https://example.com/book/2",
@@ -126,6 +147,8 @@ private class FakeRuleRepository(
     private val rules: List<SourceRule>
 ) : RuleRepository {
     override fun loadData(): Flow<List<RuleEntity>> = flowOf(emptyList())
+
+    override suspend fun syncRuleSubscription(url: String) = com.zhhz.spider.repository.RuleSubscriptionResult(0, 0, 0, "not implemented")
 
     override fun getEnabledRules(): List<SourceRule> = rules
 
@@ -183,6 +206,9 @@ private class FakeBookDao(
     override suspend fun getBooksByUrls(urls: List<String>): List<BookEntity> =
         urls.mapNotNull { books[it] }
 
+    override suspend fun getHistoryBooks(): List<BookEntity> =
+        books.values.filter { !it.inLibrary }
+
     override suspend fun removeFromBookshelf(book: BookEntity) {
         books.remove(book.detailUrl)
     }
@@ -206,4 +232,12 @@ private class FakeBookDao(
     override suspend fun insertChaptersIgnore(chapters: List<ChapterEntity>): List<Long> = emptyList()
 
     override suspend fun updateChapterMetadata(bookUrl: String, chapterUrl: String, name: String, index: Int) = Unit
+
+    override suspend fun addToGroup(urls: List<String>, mask: Long) = Unit
+
+    override suspend fun removeFromGroup(urls: List<String>, mask: Long) = Unit
+
+    override suspend fun clearGroupFromAllBooks(mask: Long) = Unit
+
+    override suspend fun setInLibrary(urls: List<String>, inLibrary: Boolean) = Unit
 }

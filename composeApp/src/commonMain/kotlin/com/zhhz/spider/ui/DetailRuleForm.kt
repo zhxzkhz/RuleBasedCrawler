@@ -28,6 +28,7 @@ fun DetailRuleForm(detailRule: DetailPage?, highlightedSelectorName: String? = n
             SelectorEditor("书名", detailRule.bookNameSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.bookNameSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(bookNameSelector = it)) }
             SelectorEditor("作者", detailRule.bookAuthorSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.bookAuthorSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(bookAuthorSelector = it)) }
             SelectorEditor("封面", detailRule.bookCoverSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.bookCoverSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(bookCoverSelector = it)) }
+            SelectorEditor("简介", detailRule.bookIntroSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.bookIntroSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(bookIntroSelector = it)) }
             SelectorEditor("标签", detailRule.bookLabelSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.bookLabelSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(bookLabelSelector = it)) }
             SelectorEditor("目录URL", detailRule.catalogUrlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "DetailPage.catalogUrlSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(detailRule.copy(catalogUrlSelector = it)) }
 

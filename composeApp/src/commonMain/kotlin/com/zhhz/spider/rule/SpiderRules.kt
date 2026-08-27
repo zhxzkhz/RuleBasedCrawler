@@ -118,12 +118,14 @@ data class CatalogPage(
     override val urlSelector: Selector = Selector(), // 如果目录和详情在同一页，这里留空
     val chapterListSelector: Selector = Selector(),
     val chapterNameSelector: Selector = Selector(),
-    val chapterUrlSelector: Selector = Selector()
+    val chapterUrlSelector: Selector = Selector(),
+    val chapterGroupSelector: Selector = Selector() // 💡 新增：章节所属卷名/分组名
 ) : IPage {
     fun getCatalogUrl(text: String, ctx: VariableContext ) = RuleParser.parseString(text, urlSelector, ctx)
     fun getChapters(text: String, ctx: VariableContext ) = RuleParser.parseList(text, chapterListSelector, ctx)
     fun getChapterName(text: Any, ctx: VariableContext ) = RuleParser.parseString(text, chapterNameSelector, ctx)
     fun getChapterUrl(text: Any, ctx: VariableContext ) = RuleParser.parseString(text, chapterUrlSelector, ctx)
+    fun getChapterGroup(text: Any, ctx: VariableContext ) = RuleParser.parseString(text, chapterGroupSelector, ctx)
 }
 
 /**
@@ -185,12 +187,76 @@ data class LoginPage(
     }
 }
 
-/** 固定分类/榜单：直接写死在规则里的 名称+地址，无需从入口页解析 */
+/** 固定分类/榜单：直接写死在规则里的 名称+地址（可带分组），无需从入口页解析 */
 @Serializable
 data class ExploreFixedTab(
     val title: String = "",
-    val url: String = ""
+    val url: String = "",
+    val group: String = ""
 )
+
+/**
+ * 分类下的排序选项：param 拼接到当前分类地址上（自动处理 ?/& 连接符）。
+ * 示例："?sort=hot"、"&o=0"；空串表示默认排序。{{page}} 翻页模板不受影响。
+ */
+@Serializable
+data class ExploreSortOption(
+    val title: String = "",
+    val param: String = ""
+)
+
+/** 把排序参数拼接到分类地址（自动处理 ?/& 连接符） */
+fun applyExploreSort(url: String, sortParam: String): String {
+    val p = sortParam.trim()
+    if (p.isEmpty()) return url
+    return if (url.contains("?")) {
+        url + (if (p.startsWith("&")) p else "&" + p.removePrefix("?"))
+    } else {
+        url + (if (p.startsWith("?")) p else "?" + p.removePrefix("&"))
+    }
+}
+
+/**
+ * 评论页：书籍评论/短评列表。
+ * urlSelector 生成评论地址（支持 {{key}}=详情URL、{{page}} 翻页），列表项解析出用户/内容等。
+ */
+@Serializable
+data class CommentPage(
+    override val config: FetchConfig = FetchConfig(),
+    override val urlSelector: Selector = Selector(),   // 评论接口/页面地址
+    val listSelector: Selector = Selector(),           // 评论列表项
+    val userSelector: Selector = Selector(),           // 用户名
+    val contentSelector: Selector = Selector(),        // 评论内容
+    val timeSelector: Selector = Selector(),           // 时间（可选）
+    val scoreSelector: Selector = Selector(),          // 评分（可选）
+    val avatarSelector: Selector = Selector(),         // 头像（可选）
+    val replyListSelector: Selector = Selector()       // 楼中楼回复列表（可选，结构与评论项一致）
+) : IPage {
+    fun getCommentUrl(input: String, ctx: VariableContext): String {
+        val rawUrl = RuleParser.parseString(input, urlSelector, ctx)
+        return RuleParser.resolveTemplate(rawUrl, input, ctx)
+    }
+    fun getComments(text: String, ctx: VariableContext) = RuleParser.parseList(text, listSelector, ctx)
+    fun getUser(item: Any, ctx: VariableContext) = RuleParser.parseString(item, userSelector, ctx)
+    fun getContent(item: Any, ctx: VariableContext) = RuleParser.parseString(item, contentSelector, ctx)
+    fun getTime(item: Any, ctx: VariableContext): String {
+        if (timeSelector.steps.isEmpty()) return ""
+        return RuleParser.parseString(item, timeSelector, ctx).trim()
+    }
+    fun getScore(item: Any, ctx: VariableContext): String {
+        if (scoreSelector.steps.isEmpty()) return ""
+        return RuleParser.parseString(item, scoreSelector, ctx).trim()
+    }
+    fun getAvatar(item: Any, ctx: VariableContext): String {
+        if (avatarSelector.steps.isEmpty()) return ""
+        return RuleParser.parseString(item, avatarSelector, ctx).trim()
+    }
+    /** 楼中楼回复列表（可选）：配置后每条评论下的回复会被平铺解析 */
+    fun getReplyList(item: Any, ctx: VariableContext): List<Any> {
+        if (replyListSelector.steps.isEmpty()) return emptyList()
+        return RuleParser.parseList(item, replyListSelector, ctx)
+    }
+}
 
 /**
  * 发现页：规则分类/榜单。
@@ -203,9 +269,11 @@ data class ExplorePage(
     override val urlSelector: Selector = Selector(),   // 发现入口地址，留空则使用书源主页 URL
     val fixedTabs: List<ExploreFixedTab> = emptyList(), // 固定分类/榜单（写死 名称+地址）
     var tabsScript: String? = null,                    // JS 脚本动态生成分类（返回 [{title,url}] 数组或 JSON 字符串）
+    val sorts: List<ExploreSortOption> = emptyList(),  // 分类下的排序选项（结果页出 Chip 切换）
     val tabsSelector: Selector = Selector(),           // 分类/榜单标签列表
     val tabNameSelector: Selector = Selector(),        // 分类名称
     val tabUrlSelector: Selector = Selector(),         // 分类对应的书籍列表页地址
+    val tabGroupSelector: Selector = Selector(),       // 分类分组名（如 男生/女生），留空则不分組
     val listSelector: Selector = Selector(),           // 分类下的书籍列表
     val nameSelector: Selector = Selector(),
     val authorSelector: Selector = Selector(),
@@ -218,6 +286,10 @@ data class ExplorePage(
     }
     fun getTabs(text: String, ctx: VariableContext) = RuleParser.parseList(text, tabsSelector, ctx)
     fun getTabName(item: Any, ctx: VariableContext) = RuleParser.parseString(item, tabNameSelector, ctx)
+    fun getTabGroup(item: Any, ctx: VariableContext): String {
+        if (tabGroupSelector.steps.isEmpty()) return ""
+        return RuleParser.parseString(item, tabGroupSelector, ctx).trim()
+    }
     fun getTabUrl(item: Any, ctx: VariableContext): String {
         val rawUrl = RuleParser.parseString(item, tabUrlSelector, ctx)
         return RuleParser.resolveTemplate(rawUrl, rawUrl, ctx)
@@ -251,8 +323,13 @@ data class SourceRule(
     val detail: DetailPage = DetailPage(),
     val catalog: CatalogPage = CatalogPage(),
     val content: ContentPage = ContentPage(),
-    val explore: ExplorePage = ExplorePage()
+    val explore: ExplorePage = ExplorePage(),
+    val comment: CommentPage = CommentPage()
 )
+
+/** 规则是否配置了可用的评论规则 */
+fun SourceRule.supportsComments(): Boolean =
+    comment.listSelector.steps.isNotEmpty() && comment.contentSelector.steps.isNotEmpty()
 
 data class TagAction(val useCache: Boolean)
 

@@ -109,3 +109,26 @@ actual fun AndroidRuleEditorServerEffect() {
 actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
     BackHandler(enabled = enabled, onBack = onBack)
 }
+
+@Composable
+actual fun WithSafeClipboard(content: @Composable () -> Unit) = content()
+
+/** 音量键事件中转站：MainActivity.dispatchKeyEvent 查询并转发 */
+object VolumeKeyHub {
+    @Volatile
+    var onVolume: ((up: Boolean) -> Unit)? = null
+}
+
+@Composable
+actual fun VolumeKeyPageEffect(enabled: Boolean, onForward: () -> Unit, onBackward: () -> Unit) {
+    val currentForward by rememberUpdatedState(onForward)
+    val currentBackward by rememberUpdatedState(onBackward)
+    DisposableEffect(enabled) {
+        if (enabled) {
+            VolumeKeyHub.onVolume = { up ->
+                if (up) currentForward() else currentBackward()
+            }
+        }
+        onDispose { VolumeKeyHub.onVolume = null }
+    }
+}

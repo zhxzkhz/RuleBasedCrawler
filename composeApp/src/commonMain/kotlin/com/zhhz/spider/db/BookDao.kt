@@ -21,6 +21,10 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE detailUrl IN (:urls)")
     suspend fun getBooksByUrls(urls: List<String>): List<BookEntity>
 
+    /** 阅读历史：所有软移除（inLibrary=0）的书 */
+    @Query("SELECT * FROM books WHERE inLibrary = 0")
+    suspend fun getHistoryBooks(): List<BookEntity>
+
     @Delete
     suspend fun removeFromBookshelf(book: BookEntity)
 
@@ -62,6 +66,24 @@ interface BookDao {
     // 3. 标记已读
     @Query("UPDATE chapters SET isRead = 1 WHERE bookUrl = :bookUrl AND url = :chapterUrl")
     suspend fun markAsRead(bookUrl: String, chapterUrl: String)
+
+    // ---------------- 自定义分组（位掩码） ----------------
+
+    /** 将一批书加入某分组（置位，保留其它分组归属） */
+    @Query("UPDATE books SET groupFlags = groupFlags | :mask WHERE detailUrl IN (:urls)")
+    suspend fun addToGroup(urls: List<String>, mask: Long)
+
+    /** 将一批书移出某分组（清位，保留其它分组归属） */
+    @Query("UPDATE books SET groupFlags = groupFlags & ~:mask WHERE detailUrl IN (:urls)")
+    suspend fun removeFromGroup(urls: List<String>, mask: Long)
+
+    /** 删除分组时：把该分组的位从所有书上清掉 */
+    @Query("UPDATE books SET groupFlags = groupFlags & ~:mask")
+    suspend fun clearGroupFromAllBooks(mask: Long)
+
+    /** 软移除/加回书架：只改 inLibrary 标记，保留章节与进度 */
+    @Query("UPDATE books SET inLibrary = :inLibrary WHERE detailUrl IN (:urls)")
+    suspend fun setInLibrary(urls: List<String>, inLibrary: Boolean)
 
     // 1. 第一步：尝试插入。如果冲突（URL已存在），则什么都不做
     // 这样可以保护数据库中已有的 isRead 状态不被覆盖

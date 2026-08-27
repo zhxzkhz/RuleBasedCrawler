@@ -29,6 +29,7 @@ fun CatalogRuleForm(catalogRule: CatalogPage?, highlightedSelectorName: String? 
             SelectorEditor("目录列表", catalogRule.chapterListSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.chapterListSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterListSelector = it)) }
             SelectorEditor("章节名称", catalogRule.chapterNameSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.chapterNameSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterNameSelector = it)) }
             SelectorEditor("章节链接", catalogRule.chapterUrlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.chapterUrlSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterUrlSelector = it)) }
+            SelectorEditor("卷名分组 (可选)", catalogRule.chapterGroupSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "CatalogPage.chapterGroupSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(catalogRule.copy(chapterGroupSelector = it)) }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = { onUpdate(CatalogPage()) }) { Text("初始化目录规则", color = Color.Red) }

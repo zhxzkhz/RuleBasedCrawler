@@ -30,7 +30,9 @@ actual fun Bitmap.descrambleAndEncode(
         if (decryptRule.isNotBlank()) {
             try {
                 output =
-                    JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(decryptRule, bindings)) as Bitmap
+                    JsExtensionClass.jsToJavaObject(
+                        JsEngineRunner.eval(bindings["__lockKey"] as? String, decryptRule, bindings)
+                    ) as Bitmap
             } catch (e: ScriptException) {
                 val errorDetail = """
                 JS执行失败！

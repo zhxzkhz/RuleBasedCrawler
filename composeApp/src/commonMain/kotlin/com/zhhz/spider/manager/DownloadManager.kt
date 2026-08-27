@@ -17,7 +17,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlin.collections.set
 
 private val logger = KotlinLogging.logger {}
@@ -26,8 +28,24 @@ class DownloadManager(
     private val catalogRepository: CatalogRepository,
     private val readerRepository: ReaderRepository,
     private val contextSessionManager: ContextSessionManager,
-    private val platformContext: PlatformContext   // 💡 注入跨平台的 Context
+    private val platformContext: PlatformContext,   // 💡 注入跨平台的 Context
+    settingsRepository: com.zhhz.spider.settings.SettingsRepository
 ) {
+
+    private val initialSettings = settingsRepository.loadBlocking()
+
+    /** 💡 可变：设置界面调整并发后立即替换信号量（新任务按新上限调度） */
+    @Volatile
+    private var bookSlots = Semaphore(initialSettings.downloadBooks)
+
+    @Volatile
+    private var imageSlots = Semaphore(initialSettings.downloadImages)
+
+    /** 设置界面调用：更新全局并发上限（对排队中的任务即时生效） */
+    fun updateConcurrency(books: Int, images: Int) {
+        bookSlots = Semaphore(books)
+        imageSlots = Semaphore(images)
+    }
 
     private val imageLoader = SingletonImageLoader.get(platformContext)
     // 💡 1. 独立于任何 ViewModel 的常驻协程作用域 (守护进程)
@@ -42,99 +60,157 @@ class DownloadManager(
     private val lock = Mutex()
 
     /**
-     * 开始或恢复下载某本书
+     * 开始或恢复下载某本书（全本）
      */
-    suspend fun startDownload(bookUrl: String, ruleId: String, bookTitle: String) = lock.withLock {
+    suspend fun startDownload(bookUrl: String, ruleId: String, bookTitle: String) =
+        launchDownload(bookUrl, ruleId, bookTitle, selectedUrls = null)
+
+    /**
+     * 只下载指定章节（选章下载 / 失败章节重试共用）
+     */
+    suspend fun downloadChapters(
+        bookUrl: String,
+        ruleId: String,
+        bookTitle: String,
+        chapterUrls: List<String>
+    ) {
+        if (chapterUrls.isEmpty()) return
+        launchDownload(bookUrl, ruleId, bookTitle, selectedUrls = chapterUrls)
+    }
+
+    private suspend fun launchDownload(
+        bookUrl: String,
+        ruleId: String,
+        bookTitle: String,
+        selectedUrls: List<String>?
+    ) = lock.withLock {
         // 防止重复启动
         if (activeJobs[bookUrl]?.isActive == true) return@withLock
 
-        // 1. 初始化或更新任务状态
+        // 1. 初始化或更新任务状态：先标记为"等待中"，拿到全局书槽位后才转"下载中"
         _downloadTasks.update { current ->
             val task = current[bookUrl] ?: DownloadTask(bookUrl, bookTitle)
-            current + (bookUrl to task.copy(status = DownloadStatus.DOWNLOADING))
+            current + (bookUrl to task.copy(status = DownloadStatus.PENDING))
         }
 
         // 2. 💡 在常驻作用域中启动实质下载任务
         val job = scope.launch {
             try {
-                contextSessionManager.forkContext(
-                    fromKey = ruleId,
-                    bookUrl = bookUrl
-                )
+                // 💡 全局书级并发上限：排队等待期间可被暂停/取消正常打断
+                bookSlots.withPermit {
+                    _downloadTasks.update { current ->
+                        val task = current[bookUrl] ?: return@update current
+                        current + (bookUrl to task.copy(status = DownloadStatus.DOWNLOADING))
+                    }
 
-                val ctx = contextSessionManager.getContext(bookUrl)
-                ctx["bookUrl"] = bookUrl
+                    contextSessionManager.forkContext(
+                        fromKey = ruleId,
+                        bookUrl = bookUrl
+                    )
 
-                // A. 获取最新目录 (默认走双层保底：内存 -> 本地 -> 网络)
-                val catalog = catalogRepository.loadData(bookUrl).ifEmpty {
-                    catalogRepository.fetchData(bookUrl, ruleId,bookUrl)
-                }
+                    val ctx = contextSessionManager.getContext(bookUrl)
+                    ctx["bookUrl"] = bookUrl
 
-                _downloadTasks.update {
-                    it + (bookUrl to it.getValue(bookUrl).copy(totalChapters = catalog.size))
-                }
+                    // A. 获取最新目录 (默认走双层保底：内存 -> 本地 -> 网络)
+                    val catalog = catalogRepository.loadData(bookUrl).ifEmpty {
+                        catalogRepository.fetchData(bookUrl, ruleId, bookUrl)
+                    }
 
-                // B. 开始遍历下载章节
-                for ((index, chapter) in catalog.withIndex()) {
-                    // 检查协程是否已被取消（比如用户点击了暂停）
-                    ensureActive()
+                    // 💡 选章过滤：保持目录顺序，只下载所选 URL；selectedUrls=null 表示全本
+                    val chaptersToFetch = if (selectedUrls != null) {
+                        val wanted = selectedUrls.toSet()
+                        catalog.filter { it.url in wanted }
+                    } else catalog
 
-                    // 💡 C. 核心：调用 ReaderRepository 抓取正文，实现静默下载缓存！
-                    // 这里由于 fetchData 已经在实现类里做好了防重/写库，这其实就是一个预读。
-                    try {
-                        // 1. 获取章节区块 (拿到文字，或者图片 URLs)
-                        val block = readerRepository.fetchData(chapter.url, ruleId,bookUrl)
+                    _downloadTasks.update { current ->
+                        val task = current[bookUrl] ?: return@update current
+                        current + (bookUrl to task.copy(
+                            totalChapters = chaptersToFetch.size,
+                            downloadedChapters = 0,
+                            failedUrls = emptyList()
+                        ))
+                    }
 
-                        // 💡 2. 核心进阶：如果是漫画，执行实质物理下载！
-                        if (block.images.isNotEmpty()) {
-                            // 为了不把服务器打挂，也可以用 forEach 串行下载；这里为了速度，可以使用受限的并发
-                            coroutineScope {
-                                for (mangaImage in block.images) {
-                                    ensureActive() // 时刻响应暂停信号
+                    // 本轮失败章节清单（供"重试失败章节"）
+                    val failedChapterUrls = mutableSetOf<String>()
 
-                                    launch {
-                                        // 💡 构建静默缓存请求
-                                        val request = imageRequest(ruleId,bookUrl,mangaImage,block.isImageDecrypt, platformContext)
+                    // B. 开始遍历下载章节
+                    for ((index, chapter) in chaptersToFetch.withIndex()) {
+                        // 检查协程是否已被取消（比如用户点击了暂停）
+                        ensureActive()
 
-                                        // 💡 魔力操作：使用 execute！
-                                        // 它会在后台默默地下载图片，写入我们配置的 DiskCache。
-                                        // 如果之前已经下载过了，它会自动秒回，绝不浪费流量。
-                                        imageLoader.execute(request)
+                        // 💡 C. 核心：调用 ReaderRepository 抓取正文，实现静默下载缓存！
+                        // 这里由于 fetchData 已经在实现类里做好了防重/写库，这其实就是一个预读。
+                        try {
+                            // 1. 获取章节区块 (拿到文字，或者图片 URLs)
+                            val block = readerRepository.fetchData(chapter.url, ruleId, bookUrl)
+
+                            // 💡 2. 核心进阶：如果是漫画，执行实质物理下载！
+                            if (block.images.isNotEmpty()) {
+                                coroutineScope {
+                                    for (mangaImage in block.images) {
+                                        ensureActive() // 时刻响应暂停信号
+
+                                        launch {
+                                            // 💡 全局图片级并发上限：所有书共享槽位，防止打满带宽
+                                            imageSlots.withPermit {
+                                                ensureActive()
+
+                                                // 💡 构建静默缓存请求
+                                                val request = imageRequest(
+                                                    ruleId, bookUrl, mangaImage, block.isImageDecrypt, platformContext
+                                                )
+
+                                                // 💡 魔力操作：使用 execute！
+                                                // 它会在后台默默地下载图片，写入我们配置的 DiskCache。
+                                                // 如果之前已经下载过了，它会自动秒回，绝不浪费流量。
+                                                imageLoader.execute(request)
+                                            }
+                                        }
                                     }
                                 }
                             }
+                        } catch (e: CancellationException) {
+                            // 暂停/取消必须向上传播，不能被当成"单章失败"吞掉
+                            throw e
+                        } catch (e: Exception) {
+                            // 某个章节下载失败：记录 URL 供重试，继续后续章节
+                            failedChapterUrls.add(chapter.url)
+                            e.printStackTrace()
                         }
-                    } catch (e: Exception) {
-                        // 某个章节下载失败，可以记录错误并跳过，或者直接终止
-                        e.printStackTrace()
+
+                        // D. 每下载完一章(所有文字/图片都落盘了)，更新进度 UI
+                        _downloadTasks.update { currentMap ->
+                            val task = currentMap[bookUrl] ?: return@update currentMap
+                            currentMap + (bookUrl to task.copy(downloadedChapters = index + 1))
+                        }
                     }
 
-                    // D. 每下载完一章(所有文字/图片都落盘了)，更新进度 UI
-                    _downloadTasks.update { currentMap ->
-                        val task = currentMap.getValue(bookUrl)
-                        currentMap + (bookUrl to task.copy(downloadedChapters = index + 1))
+                    // 下载全部完成（附带失败清单供重试）
+                    _downloadTasks.update { current ->
+                        val task = current[bookUrl] ?: return@update current
+                        current + (bookUrl to task.copy(
+                            status = DownloadStatus.COMPLETED,
+                            failedUrls = failedChapterUrls.toList()
+                        ))
                     }
                 }
-
-                // 下载全部完成
-                _downloadTasks.update {
-                    it + (bookUrl to it.getValue(bookUrl).copy(status = DownloadStatus.COMPLETED))
-                }
-
             } catch (_: CancellationException) {
-                // 用户暂停或系统取消，属于正常流转
-                _downloadTasks.update {
-                    it + (bookUrl to it.getValue(bookUrl).copy(status = DownloadStatus.PAUSED))
-                }
-            } catch (e: Exception) {
-                logger.error { e }
-                // 网络崩溃等真异常
-                _downloadTasks.update {
-                    it + (bookUrl to it.getValue(bookUrl).copy(status = DownloadStatus.ERROR))
-                }
-            } finally {
-                activeJobs.remove(bookUrl)
+            // 用户暂停或系统取消，属于正常流转；任务被"取消移除"时不复活条目
+            _downloadTasks.update { current ->
+                val task = current[bookUrl] ?: return@update current
+                current + (bookUrl to task.copy(status = DownloadStatus.PAUSED))
             }
+        } catch (e: Exception) {
+            logger.error { e }
+            // 网络崩溃等真异常
+            _downloadTasks.update { current ->
+                val task = current[bookUrl] ?: return@update current
+                current + (bookUrl to task.copy(status = DownloadStatus.ERROR))
+            }
+        } finally {
+            activeJobs.remove(bookUrl)
+        }
         }
         activeJobs[bookUrl] = job
     }
@@ -144,6 +220,27 @@ class DownloadManager(
      */
     suspend fun pauseDownload(bookUrl: String) = lock.withLock {
         activeJobs[bookUrl]?.cancel() // 💡 取消协程即为暂停
+    }
+
+    /**
+     * 取消下载：终止任务并从任务列表移除（区别于暂停——不保留续传记录）
+     */
+    suspend fun cancelDownload(bookUrl: String) = lock.withLock {
+        val job = activeJobs.remove(bookUrl)
+        // 先移除条目再取消协程：取消回调发现条目不存在就不会把 PAUSED 写回来
+        _downloadTasks.update { it - bookUrl }
+        job?.cancel()
+    }
+
+    /**
+     * 清除所有未完成任务（等待中/下载中/暂停/失败），已完成任务保留
+     */
+    suspend fun cancelUnfinished() = lock.withLock {
+        val unfinished = _downloadTasks.value.filterValues { it.status != DownloadStatus.COMPLETED }
+        unfinished.keys.forEach { url ->
+            activeJobs.remove(url)?.cancel()
+        }
+        _downloadTasks.update { current -> current.filterValues { it.status == DownloadStatus.COMPLETED } }
     }
 }
 

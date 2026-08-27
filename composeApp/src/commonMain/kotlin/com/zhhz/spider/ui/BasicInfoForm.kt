@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zhhz.spider.constant.BookType
 import com.zhhz.spider.db.RuleDao
 import com.zhhz.spider.rule.SourceRule
 import kotlinx.coroutines.CoroutineScope
@@ -69,6 +70,29 @@ fun BasicInfoForm(rule: SourceRule, scope : CoroutineScope, onRuleChange: (Sourc
                     label = { Text("dns代理(可选)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // 💡 书籍类型：决定搜索/详情/阅读链路按小说还是漫画处理
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text("书籍类型", fontSize = 14.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(
+                            selected = rule.type == BookType.text,
+                            onClick = { onRuleChange(rule.copy(type = BookType.text)) }
+                        )
+                        Text("小说", fontSize = 13.sp)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(
+                            selected = rule.type == BookType.image,
+                            onClick = { onRuleChange(rule.copy(type = BookType.image)) }
+                        )
+                        Text("漫画", fontSize = 13.sp)
+                    }
+                }
 
 
 

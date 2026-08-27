@@ -10,6 +10,19 @@ import java.lang.reflect.Field
 
 class MainActivity : ComponentActivity() {
 
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // 💡 音量键翻页：阅读器处于翻页模式时注册了回调，拦截音量键不再调节系统音量
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && !event.isLongPress) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_VOLUME_UP ->
+                    VolumeKeyHub.onVolume?.let { it(true); return true }
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN ->
+                    VolumeKeyHub.onVolume?.let { it(false); return true }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)

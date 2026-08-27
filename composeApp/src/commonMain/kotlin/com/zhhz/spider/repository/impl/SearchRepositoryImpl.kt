@@ -114,8 +114,8 @@ class SearchRepositoryImpl(
 
     override suspend fun saveData(book: Book) {
         withContext(Dispatchers.IO) {
-            // 调用 Dao 插入数据库
-            bookDao.addToBookshelf(book.toEntity()) // 假设 Dao 里有 insert 方法
+            // 调用 Dao 插入数据库（加入书架必须标记为在架，否则会被书架过滤掉）
+            bookDao.addToBookshelf(book.copy(inLibrary = true).toEntity())
         }
     }
 }
