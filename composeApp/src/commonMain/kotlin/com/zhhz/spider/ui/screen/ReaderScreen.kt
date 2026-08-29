@@ -53,6 +53,7 @@ import com.zhhz.spider.constant.BookType
 import com.zhhz.spider.ui.widget.LoadingBox
 import com.zhhz.spider.ui.widget.MangaReaderView
 import com.zhhz.spider.ui.widget.NovelReaderView
+import com.zhhz.spider.PlatformBackHandler
 import com.zhhz.spider.viewModel.ReaderUiEffect
 import com.zhhz.spider.viewModel.ReaderUiIntent
 import com.zhhz.spider.viewModel.ReaderViewModel
@@ -101,27 +102,18 @@ fun ReaderScreen(
         }
     }
 
+    // 💡 处理全局返回键/Esc
+    PlatformBackHandler(enabled = uiState.isMenuVisible || uiState.isSettingsVisible) {
+        viewModel.processIntent(ReaderUiIntent.ToggleMenu)
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = themeBackground
     ) {
-        // 💡 桌面端键盘：Esc 关闭菜单/设置面板（内容容器持焦点以接收按键）
-        val rootFocus = remember { FocusRequester() }
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .focusRequester(rootFocus)
-                .focusable()
-                .onPreviewKeyEvent { e ->
-                    if (e.type == KeyEventType.KeyDown && e.key == Key.Escape &&
-                        (uiState.isMenuVisible || uiState.isSettingsVisible)
-                    ) {
-                        viewModel.processIntent(ReaderUiIntent.ToggleMenu)
-                        true
-                    } else false
-                }
+            modifier = Modifier.fillMaxSize()
         ) {
-            LaunchedEffect(Unit) { runCatching { rootFocus.requestFocus() } }
 
             // 阅读内容：铺满全屏，菜单以悬浮 HUD 形式叠加（不挤压内容、无二次布局跳动）
             if (uiState.isLoading) {
@@ -129,8 +121,11 @@ fun ReaderScreen(
             } else {
                 when (uiState.bookType) {
                     BookType.text -> {
-                        NovelReaderView(
+                        com.zhhz.spider.ui.widget.novel.NovelReaderEngine(
                             uiState = uiState,
+                            onProgressUpdate = { index, progress ->
+                                viewModel.processIntent(ReaderUiIntent.UpdateReadProgress(index, progress))
+                            },
                             onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
                             onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
                             onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }

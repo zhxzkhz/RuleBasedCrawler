@@ -196,12 +196,15 @@ fun StepRow(index: Int, step: ParseStep, onStepChange: (ParseStep) -> Unit, onDe
         // 5. 操作区 (List + 删除)
         Spacer(Modifier.width(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = step.isList,
-                onCheckedChange = { onStepChange(step.copy(isList = it)) },
-                modifier = Modifier.size(24.dp)
-            )
-            Text("List", fontSize = 10.sp, color = Color.Gray)
+            // 💡 只有 REGEX (正则) 规则才显示 isList 选项框
+            if (step.type == com.zhhz.spider.rule.StepType.REGEX) {
+                Checkbox(
+                    checked = step.isList,
+                    onCheckedChange = { onStepChange(step.copy(isList = it)) },
+                    modifier = Modifier.size(24.dp)
+                )
+                Text("List", fontSize = 10.sp, color = Color.Gray)
+            }
         }
         IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
             Icon(

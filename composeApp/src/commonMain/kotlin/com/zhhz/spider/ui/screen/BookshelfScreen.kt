@@ -36,6 +36,7 @@ import com.zhhz.spider.DetailRoute
 import com.zhhz.spider.db.BookGroupEntity
 import com.zhhz.spider.rememberBookExportDirectoryAction
 import com.zhhz.spider.viewModel.unreadChapterCount
+import com.zhhz.spider.PlatformBackHandler
 import com.zhhz.spider.rememberRuleFileActions
 import com.zhhz.spider.model.DownloadStatus
 import com.zhhz.spider.model.DownloadTask
@@ -121,6 +122,11 @@ fun BookshelfScreen(
             }
         }
     )
+
+    // 💡 处理全局返回键/Esc
+    PlatformBackHandler(enabled = uiState.isSelectionMode) {
+        viewModel.processIntent(BookshelfUiIntent.ToggleSelectionMode)
+    }
 
     // 副作用监听 (Toast 和 跳页)
     LaunchedEffect(Unit) {

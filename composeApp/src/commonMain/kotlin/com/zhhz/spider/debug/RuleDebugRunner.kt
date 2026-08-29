@@ -259,7 +259,14 @@ object RuleDebugRunner {
                     chapters.forEach { chapter ->
                         val chapterName = traceString("CatalogPage.chapterNameSelector", chapter, rule.catalog.chapterNameSelector, ctx, traces)
                         val chapterUrl = traceString("CatalogPage.chapterUrlSelector", chapter, rule.catalog.chapterUrlSelector, ctx, traces)
-                        log.appendLine("$chapterName >> $chapterUrl")
+                        val chapterGroup = if (rule.catalog.chapterGroupSelector.steps.isNotEmpty()) {
+                            traceString("CatalogPage.chapterGroupSelector", chapter, rule.catalog.chapterGroupSelector, ctx, traces)
+                        } else ""
+                        if (chapterGroup.isNotBlank()) {
+                            log.appendLine("[$chapterGroup] $chapterName >> $chapterUrl")
+                        } else {
+                            log.appendLine("$chapterName >> $chapterUrl")
+                        }
                     }
                 }
 
@@ -268,6 +275,21 @@ object RuleDebugRunner {
                     log.appendLine("√ 内容提取成功，共 ${text.size} 项")
                     text.take(20).forEachIndexed { index, item ->
                         log.appendLine("[$index] $item")
+                    }
+
+                    if (rule.content.nextUrlSelector.steps.isNotEmpty()) {
+                        val nextUrl = traceString("ContentPage.nextUrlSelector", html, rule.content.nextUrlSelector, ctx, traces)
+                        if (nextUrl.isNotBlank()) log.appendLine("√ 下一页/章 URL: $nextUrl")
+                    }
+
+                    if (rule.content.imageHeaders.steps.isNotEmpty()) {
+                        val headers = traceString("ContentPage.imageHeaders", html, rule.content.imageHeaders, ctx, traces)
+                        if (headers.isNotBlank()) log.appendLine("√ 图片请求头: $headers")
+                    }
+
+                    if (rule.content.regexReplaceSelector.steps.isNotEmpty()) {
+                        val replaces = traceList("ContentPage.regexReplaceSelector", html, rule.content.regexReplaceSelector, ctx, traces)
+                        if (replaces.isNotEmpty()) log.appendLine("√ 正则替换规则: $replaces")
                     }
                 }
 

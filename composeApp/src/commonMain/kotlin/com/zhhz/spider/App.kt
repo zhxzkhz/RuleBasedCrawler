@@ -87,7 +87,6 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
         val contextSessionManager = koinInject< ContextSessionManager>()
         AndroidRuleEditorServerEffect()
 
-        // DiskCache is process-wide. Do not recreate it when App recomposes.
         val diskCache = remember {
             DiskCache.Builder()
                 .fileSystem(FileSystem.SYSTEM)
@@ -102,6 +101,11 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
 
         setSingletonImageLoaderFactory { context ->
             ImageLoader.Builder(context)
+                .memoryCache {
+                    coil3.memory.MemoryCache.Builder()
+                        .maxSizePercent(context, 0.25) // 使用 25% 的可用内存作为图片缓存
+                        .build()
+                }
                 .diskCache(diskCache)
                 .components {
                     // 【核心挂载】不再传死 Client，而是传我们的动态工厂

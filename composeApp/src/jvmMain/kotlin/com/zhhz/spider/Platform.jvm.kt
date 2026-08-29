@@ -1,6 +1,9 @@
 package com.zhhz.spider
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import java.awt.Dialog
 import java.awt.FileDialog
@@ -195,7 +198,20 @@ private inline fun <T> FileDialog.useDialog(block: FileDialog.() -> T): T =
 actual fun AndroidRuleEditorServerEffect() = Unit
 
 @Composable
-actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) = Unit
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+    val currentOnBack by rememberUpdatedState(onBack)
+    DisposableEffect(enabled) {
+        if (enabled) {
+            val handler = { currentOnBack() }
+            DesktopBackDispatcher.register(handler)
+            onDispose {
+                DesktopBackDispatcher.unregister(handler)
+            }
+        } else {
+            onDispose {}
+        }
+    }
+}
 
 @Composable
 actual fun VolumeKeyPageEffect(enabled: Boolean, onForward: () -> Unit, onBackward: () -> Unit) = Unit

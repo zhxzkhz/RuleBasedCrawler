@@ -107,6 +107,22 @@ private fun calculateChapterIndex(blocks: List<ChapterBlock>, firstVisibleIndex:
     return blocks.firstOrNull()?.index ?: 0
 }
 
+/**
+ * 💡 纯函数算法：推算出当前可见元素在「所属章节」内的绝对图片索引（用于精确保存阅读进度）
+ */
+private fun calculateImageIndexInChapter(blocks: List<ChapterBlock>, firstVisibleIndex: Int, chapterIndex: Int): Int {
+    var accumulatedItemCount = 0
+    for (block in blocks) {
+        if (block.index == chapterIndex) {
+            // 减去当前章节的前置 Header（分割线占 1 个 Item）
+            val offset = firstVisibleIndex - accumulatedItemCount - 1
+            return offset.coerceAtLeast(0)
+        }
+        accumulatedItemCount += if (block.images.isEmpty()) 2 else 1 + block.images.size
+    }
+    return 0
+}
+
 
 /**
  * 💡 纯函数算法：根据 LazyColumn 里的绝对可见索引，刨除所有的 Header，推算出当前对应的是 flattenedImages 里的第几张图。
@@ -255,7 +271,21 @@ fun MangaReaderView(
         }
     }
 
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = uiState.currentProgress)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = run {
+            var itemsBefore = 0
+            var targetItem = 0
+            for (block in uiState.content.blocks) {
+                if (block.index == uiState.currentIndex) {
+                    // +1 是因为有章节分割线 Header
+                    targetItem = itemsBefore + 1 + uiState.currentProgress
+                    break
+                }
+                itemsBefore += if (block.images.isEmpty()) 2 else 1 + block.images.size
+            }
+            targetItem
+        }
+    )
     val interactionSource = remember { MutableInteractionSource() }
     val context = LocalPlatformContext.current
     // 💡 1. 核心判断：提取出当前的“末尾块”，看看它是不是空的
@@ -313,8 +343,11 @@ fun MangaReaderView(
                 // 计算当前属于哪一章 (通过遍历 blocks 判断)
                 val currentChapterIndex = calculateChapterIndex(uiState.content.blocks, firstVisibleIndex)
 
-                // 上报精确进度：第几章，以及列表当前的绝对 Item Index
-                onProgressUpdate(currentChapterIndex, firstVisibleIndex)
+                // 计算出该可见项在「当前章」内的图片索引
+                val imageIndexInChapter = calculateImageIndexInChapter(uiState.content.blocks, firstVisibleIndex, currentChapterIndex)
+
+                // 上报精确进度：第几章，以及章内图片索引
+                onProgressUpdate(currentChapterIndex, imageIndexInChapter)
             }
     }
 
@@ -496,7 +529,6 @@ fun MangaReaderView(
                             ) {
                                 buildRequest(image, block.isImageDecrypt).newBuilder()
                                     .size(Dimension.Pixels(targetWidth), Dimension.Undefined)
-                                    .crossfade(150)
                                     .build()
                             }
 
@@ -617,17 +649,17 @@ private fun MangaPagedView(
 
     val pagerState = rememberPagerState(
         initialPage = run {
-            // 从"当前章节"定位起始页
+            // 从"当前章节"与"章内进度"精确定位起始页
             var acc = 0
             var start = 0
             for (block in uiState.content.blocks) {
-                if (block.index == uiState.currentIndex && block.images.isNotEmpty()) {
-                    start = acc
+                if (block.index == uiState.currentIndex) {
+                    start = acc + uiState.currentProgress
                     break
                 }
                 acc += block.images.size
             }
-            start.coerceIn(0, totalPages - 1)
+            start.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
         },
         pageCount = { totalPages }
     )
@@ -658,14 +690,14 @@ private fun MangaPagedView(
         }
     }
 
-    // 上报进度（全局图片序号）+ 滑到末尾自动加载下一章
+    // 上报进度（全局图片序号转换为章内进度）+ 滑到末尾自动加载下一章
     LaunchedEffect(pagerState, uiState.hasNext, uiState.isLoading) {
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
             .debounce(250L)
             .collect { page ->
                 val meta = pages.getOrNull(page) ?: return@collect
-                onProgressUpdate(meta.chapterIndex, page)
+                onProgressUpdate(meta.chapterIndex, meta.inChapter - 1) // 💡 必须使用章内图片索引！
                 // 距离末尾 1 页且还有下一章 → 自动追加
                 if (!rtl && page >= totalPages - 2 && uiState.hasNext && !uiState.isLoading) onNext()
             }
@@ -729,7 +761,6 @@ private fun MangaPagedView(
                 val request = remember(meta.image.url, meta.isDecrypt, retryKey, constraints.maxWidth) {
                     buildRequest(meta.image, meta.isDecrypt).newBuilder()
                         .size(Dimension.Pixels(constraints.maxWidth), Dimension.Undefined)
-                        .crossfade(120)
                         .build()
                 }
 

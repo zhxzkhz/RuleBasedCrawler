@@ -109,7 +109,7 @@ class DetailRepositoryImpl(
 
 
     override fun loadBookshelfStatus(bookUrl: String): Flow<Boolean> {
-        return bookDao.getBookFlow(bookUrl).map { it != null }.distinctUntilChanged()
+        return bookDao.getBookFlow(bookUrl).map { it?.inLibrary == true }.distinctUntilChanged()
     }
 
     override suspend fun saveData(book: Book) {

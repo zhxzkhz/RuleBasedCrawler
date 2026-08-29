@@ -28,6 +28,8 @@ class CommentRepositoryImpl(
             val ctx = contextSessionManager.getContext(rule.id)
             ctx["bookUrl"] = bookUrl
             ctx["page"] = page.toString()
+            ctx["page-1"] = (page - 1).toString()
+            ctx["page-0"] = (page - 1).toString()
 
             // 评论地址：urlSelector 支持 {{key}}(详情URL) 与 {{page}} 模板
             val commentUrl = rule.comment.getCommentUrl(bookUrl, ctx)

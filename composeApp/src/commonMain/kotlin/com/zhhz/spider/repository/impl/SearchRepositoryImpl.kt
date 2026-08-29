@@ -50,6 +50,8 @@ class SearchRepositoryImpl(
                     val ctx = contextSessionManager.getContext(rule.id)
                     ctx["keyword"] = keyword
                     ctx["page"] = page.toString()
+                    ctx["page-1"] = (page - 1).toString()
+                    ctx["page-0"] = (page - 1).toString() // 别名，都表示从0开始的页码
                     val html = fetchTaskRunner.fetch(rule, rule.search, keyword, ctx)
                     if (html.startsWith("ERROR:")) {
                         throw IllegalStateException(html.removePrefix("ERROR:").trim())

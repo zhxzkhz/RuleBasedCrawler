@@ -162,6 +162,15 @@ object RuleParser {
 
     private fun processBatch(inputs: List<Any>, root: Any, step: ParseStep, ctx: VariableContext): List<Any> {
         val output = mutableListOf<Any>()
+        
+        fun addResult(res: Any?) {
+            when (res) {
+                is Iterable<*> -> res.filterNotNull().forEach { addResult(it) }
+                is Array<*> -> res.filterNotNull().forEach { addResult(it) }
+                else -> if (res != null && res.toString().isNotEmpty()) output.add(res)
+            }
+        }
+
         for (item in inputs) {
             val res = try {
                 processSingle(item, root, step, ctx)
@@ -171,8 +180,7 @@ object RuleParser {
                 }
                 throw e
             }
-            if (res is List<*>) res.filterNotNull().forEach { output.add(it) }
-            else if (res != null && res != "") output.add(res)
+            addResult(res)
         }
         return output
     }

@@ -207,7 +207,7 @@ class DetailViewModel(
                             title = localBook.title,
                             author = localBook.author,
                             cover = localBook.cover,
-                            isInBookshelf = true
+                            isInBookshelf = localBook.inLibrary
                         )
                     }
                     if (uiState.value.title.isBlank()) {
@@ -234,7 +234,7 @@ class DetailViewModel(
                         latestChapterTitle = localChapters.lastOrNull()?.title.orEmpty(),
                         catalogUrl = localDetail?.catalogUrl.orEmpty(),
                         labels = localDetail?.labels.orEmpty(),
-                        isInBookshelf = true,
+                        isInBookshelf = localBook.inLibrary,
                         lastReadChapterIndex = localBook.lastReadChapterIndex,
                         lastReadChapterTitle = localBook.lastReadChapterTitle,
                         isLoading = false,
@@ -327,13 +327,26 @@ class DetailViewModel(
     }
 
     private fun handleGoToReader() {
-        // 如果点击底部的“开始阅读”按钮，默认打开第一章
-        val firstChapter = uiState.value.chapters.firstOrNull()
-        if (firstChapter != null) {
-            handleChapterClicked(firstChapter)
-        } else {
-            sendEffect(DetailUiEffect.ShowToast("目录正在加载中，请稍候"))
-        }
+        val state = uiState.value
+        val ruleId = state.currentSource?.ruleId ?: return
+
+        // 1. 将完整的目录列表存入内存，供阅读器做“上一章/下一章”极速切换
+        sessionRepository.saveCatalog(state.chapters)
+
+        // 2. 传递轻量级基本类型路由对象跳转
+        // 如果有阅读进度，传 -1 告诉阅读器自动恢复进度；否则传第一章的 index (0)
+        val targetIndex = if (state.lastReadChapterIndex >= 0) -1 else 0
+
+        sendEffect(
+            DetailUiEffect.NavigateToReader(
+                route = ReaderGraph.Reader(
+                    bookUrl = state.bookUrl,
+                    chapterIndex = targetIndex,
+                    chapterTitle = state.title,
+                    ruleId = ruleId
+                )
+            )
+        )
     }
 
 
