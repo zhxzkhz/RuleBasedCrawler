@@ -107,20 +107,20 @@ class CatalogRepositoryImpl(
                 // 💡 算法 C：极罕见的异常情况：网络章节数居然小于本地（说明源站被删改或重组了）
                 // 此时执行保底容错，清空本地，重新全量对齐
                 else -> {
-                    chapterDao.deleteChaptersByBookUrl(bookUrl)
-                    // 用 URL 匹配已读状态，而非 index——目录插入/重排后 index 会变，但 URL 不变
-                    val readStateByUrl = localChapters.associate { it.url to it.isRead }
+                    chapterDao.deleteChaptersByBookUrl(bookUrl) // 删
+                    val readStateByIndex = localChapters.associate { it.indexNum to it.isRead }
                     val entities = chapters.mapIndexed { index, bean ->
                         ChapterEntity(
                             bookUrl = bookUrl,
                             title = bean.title,
                             url = bean.url,
                             indexNum = index,
-                            isRead = readStateByUrl[bean.url] ?: false,
+                            isRead = readStateByIndex[index] ?: false,
                             groupName = bean.group
                         )
                     }
                     chapterDao.saveCatalog(bookUrl, entities)
+                    println("Incremental Sync: 目录内容发生变化，已执行全量对齐。")
                 }
             }
         }
