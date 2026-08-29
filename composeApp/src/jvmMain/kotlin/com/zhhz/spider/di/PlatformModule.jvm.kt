@@ -1,12 +1,17 @@
 package com.zhhz.spider.di
 
 import androidx.room.Room
-import androidx.room.migration.Migration
-import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
-import androidx.sqlite.execSQL
 import coil3.PlatformContext
 import com.zhhz.spider.db.AppDatabase
+import com.zhhz.spider.db.MIGRATION_3_4
+import com.zhhz.spider.db.MIGRATION_4_5
+import com.zhhz.spider.db.MIGRATION_5_6
+import com.zhhz.spider.db.MIGRATION_6_7
+import com.zhhz.spider.db.MIGRATION_7_8
+import com.zhhz.spider.db.MIGRATION_8_9
+import com.zhhz.spider.db.MIGRATION_9_10
+import com.zhhz.spider.db.MIGRATION_10_11
 import com.zhhz.spider.util.BookPackager
 import okio.Path.Companion.toOkioPath
 import org.koin.core.module.dsl.singleOf
@@ -21,7 +26,7 @@ actual val platformModule = module {
         println("dbFile >> $dbFile")
         Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
             .setDriver(BundledSQLiteDriver())
-            .addMigrations(MIGRATION_3_4, com.zhhz.spider.db.MIGRATION_7_8, com.zhhz.spider.db.MIGRATION_8_9, com.zhhz.spider.db.MIGRATION_9_10, com.zhhz.spider.db.MIGRATION_10_11)
+            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
             .fallbackToDestructiveMigration(true)
             .build()
     }
@@ -50,23 +55,4 @@ actual val platformModule = module {
 
     // 注入桌面端专有的 Swing 编辑器
     //single<EditorProvider> { DesktopEditorProvider() }
-}
-
-
-val MIGRATION_3_4 = object : Migration(3, 4) {
-    override fun migrate(connection: SQLiteConnection) {
-        // 执行创建 chapters 表的 SQL 语句
-        // 注意：字段名和类型必须与 ChapterEntity 严格对应
-        connection.execSQL("""
-            CREATE TABLE IF NOT EXISTS `chapters` (
-                `bookUrl` TEXT NOT NULL, 
-                `url` TEXT NOT NULL, 
-                `name` TEXT NOT NULL, 
-                `index` INTEGER NOT NULL, 
-                `isRead` INTEGER NOT NULL DEFAULT 0, 
-                PRIMARY KEY(`bookUrl`, `url`), 
-                FOREIGN KEY(`bookUrl`) REFERENCES `books`(`detailUrl`) ON UPDATE NO ACTION ON DELETE CASCADE 
-            )
-        """.trimIndent())
-    }
 }

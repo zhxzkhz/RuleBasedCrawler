@@ -26,7 +26,11 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
 
     private val myCookieJar = object : CookieJar {
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            cookieStore[url.host] = cookies
+            val host = url.host
+            val existing = cookieStore[host].orEmpty()
+            // 按 name+path 去重合并，新 cookie 覆盖同名旧 cookie
+            val merged = (existing + cookies).associateBy { "${it.name}@${it.path}" }.values.toList()
+            cookieStore[host] = merged
         }
         override fun loadForRequest(url: HttpUrl): List<Cookie> = cookieStore[url.host] ?: listOf()
     }
@@ -87,7 +91,6 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
     }
 
     private fun getOrCreateClient(sourceId: String, currentProxy: Proxy?, dnsConfig: String?): OkHttpClient {
-        // 1. 只计算影响网络构建的字段的哈希值
         val currentFingerprint = Objects.hash(currentProxy, dnsConfig)
 
         val cachedClient = clientRegistry[sourceId]
@@ -97,7 +100,12 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
             return cachedClient
         }
 
-        // 3. 否则重建
+        // 重建 client 前清理旧实例的连接池，防止线程泄漏
+        cachedClient?.let {
+            it.dispatcher.executorService.shutdown()
+            it.connectionPool.evictAll()
+        }
+
         val newClient = baseClient.newBuilder().proxy(currentProxy).dns(SmartDns(dnsConfig)).build()
 
         clientRegistry[sourceId] = newClient
@@ -108,7 +116,10 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
 
     private fun applyRateLimit(id: String, delay: Long) {
         val wait = (lastRequestMap[id] ?: 0) + delay - System.currentTimeMillis()
-        if (wait > 0) Thread.sleep(wait)
+        if (wait > 0) {
+            // 使用可中断等待而非 Thread.sleep，避免阻塞协程调度器线程
+            java.util.concurrent.locks.LockSupport.parkNanos(wait * 1_000_000)
+        }
         lastRequestMap[id] = System.currentTimeMillis()
     }
 }

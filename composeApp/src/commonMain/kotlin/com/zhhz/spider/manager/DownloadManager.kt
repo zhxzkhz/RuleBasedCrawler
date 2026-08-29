@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.set
 
 private val logger = KotlinLogging.logger {}
@@ -34,17 +35,44 @@ class DownloadManager(
 
     private val initialSettings = settingsRepository.loadBlocking()
 
-    /** 💡 可变：设置界面调整并发后立即替换信号量（新任务按新上限调度） */
-    @Volatile
-    private var bookSlots = Semaphore(initialSettings.downloadBooks)
+    /**
+     * 可动态调整上限的并发控制器。
+     * - 新任务使用当前 limit 排队
+     * - limit 降低时，已持有的许可不受影响（自然耗尽），新任务按新上限等待
+     * - 替换信号量不会泄漏已分配的许可
+     */
+    private class ResizeableSemaphore(initialLimit: Int) {
+        @Volatile private var semaphore = Semaphore(initialLimit)
+        private val activePermits = AtomicInteger(0)
+        @Volatile private var limit = initialLimit
 
-    @Volatile
-    private var imageSlots = Semaphore(initialSettings.downloadImages)
+        fun resize(newLimit: Int) {
+            if (newLimit < 1) return
+            limit = newLimit
+            // 始终用新实例接收新任务；旧实例的 withPermit 仍在其生命周期内正常释放
+            semaphore = Semaphore(newLimit)
+        }
+
+        suspend fun <T> withPermit(block: suspend () -> T): T {
+            val currentSem = semaphore
+            currentSem.acquire()
+            activePermits.incrementAndGet()
+            try {
+                return block()
+            } finally {
+                activePermits.decrementAndGet()
+                currentSem.release()
+            }
+        }
+    }
+
+    private val bookSlots = ResizeableSemaphore(initialSettings.downloadBooks)
+    private val imageSlots = ResizeableSemaphore(initialSettings.downloadImages)
 
     /** 设置界面调用：更新全局并发上限（对排队中的任务即时生效） */
     fun updateConcurrency(books: Int, images: Int) {
-        bookSlots = Semaphore(books)
-        imageSlots = Semaphore(images)
+        bookSlots.resize(books)
+        imageSlots.resize(images)
     }
 
     private val imageLoader = SingletonImageLoader.get(platformContext)
@@ -140,9 +168,7 @@ class DownloadManager(
                         ensureActive()
 
                         // 💡 C. 核心：调用 ReaderRepository 抓取正文，实现静默下载缓存！
-                        // 这里由于 fetchData 已经在实现类里做好了防重/写库，这其实就是一个预读。
                         try {
-                            // 1. 获取章节区块 (拿到文字，或者图片 URLs)
                             val block = readerRepository.fetchData(chapter.url, ruleId, bookUrl)
 
                             // 💡 2. 核心进阶：如果是漫画，执行实质物理下载！
@@ -152,18 +178,12 @@ class DownloadManager(
                                         ensureActive() // 时刻响应暂停信号
 
                                         launch {
-                                            // 💡 全局图片级并发上限：所有书共享槽位，防止打满带宽
                                             imageSlots.withPermit {
                                                 ensureActive()
 
-                                                // 💡 构建静默缓存请求
                                                 val request = imageRequest(
                                                     ruleId, bookUrl, mangaImage, block.isImageDecrypt, platformContext
                                                 )
-
-                                                // 💡 魔力操作：使用 execute！
-                                                // 它会在后台默默地下载图片，写入我们配置的 DiskCache。
-                                                // 如果之前已经下载过了，它会自动秒回，绝不浪费流量。
                                                 imageLoader.execute(request)
                                             }
                                         }
@@ -176,7 +196,7 @@ class DownloadManager(
                         } catch (e: Exception) {
                             // 某个章节下载失败：记录 URL 供重试，继续后续章节
                             failedChapterUrls.add(chapter.url)
-                            e.printStackTrace()
+                            logger.error(e) { "章节下载失败: ${chapter.url}" }
                         }
 
                         // D. 每下载完一章(所有文字/图片都落盘了)，更新进度 UI
@@ -196,22 +216,23 @@ class DownloadManager(
                     }
                 }
             } catch (_: CancellationException) {
-            // 用户暂停或系统取消，属于正常流转；任务被"取消移除"时不复活条目
-            _downloadTasks.update { current ->
-                val task = current[bookUrl] ?: return@update current
-                current + (bookUrl to task.copy(status = DownloadStatus.PAUSED))
+                // 用户暂停或系统取消，属于正常流转；任务被"取消移除"时不复活条目
+                _downloadTasks.update { current ->
+                    val task = current[bookUrl] ?: return@update current
+                    current + (bookUrl to task.copy(status = DownloadStatus.PAUSED))
+                }
+            } catch (e: Exception) {
+                logger.error { e }
+                // 网络崩溃等真异常
+                _downloadTasks.update { current ->
+                    val task = current[bookUrl] ?: return@update current
+                    current + (bookUrl to task.copy(status = DownloadStatus.ERROR))
+                }
+            } finally {
+                lock.withLock { activeJobs.remove(bookUrl) }
             }
-        } catch (e: Exception) {
-            logger.error { e }
-            // 网络崩溃等真异常
-            _downloadTasks.update { current ->
-                val task = current[bookUrl] ?: return@update current
-                current + (bookUrl to task.copy(status = DownloadStatus.ERROR))
-            }
-        } finally {
-            activeJobs.remove(bookUrl)
         }
-        }
+        // 必须在锁内写入，确保 cancelDownload/pauseDownload 不会遗漏
         activeJobs[bookUrl] = job
     }
 

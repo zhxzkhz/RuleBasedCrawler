@@ -25,6 +25,10 @@ object RuleParser {
     private val regexPatternCache = ConcurrentHashMap<String, Pattern>()
     private val replaceRegexCache = ConcurrentHashMap<String, Regex>()
 
+    // 预编译高频正则，避免每次调用重复编译
+    private val internalQueryRegex = Regex("""\{\{\s*(?:(root)\.?)?(css:|xpath:|json:|\$\.|key)(.*?)\s*\}\}""")
+    private val templateRegex = Regex("""\{\{\s*([A-Za-z_][\w.-]*|key)\s*\}\}""")
+
     /** 预期返回字符串 */
     fun parseString(input: Any?, selector: Selector, ctx: VariableContext): String {
         val res = parseInternal(input, selector, ctx)
@@ -304,13 +308,7 @@ object RuleParser {
     }
 
     private fun parseInternalQueries(template: String, item: Any, root: Any): String {
-        // 增强正则：支持 root.css:/root.xpath:/root.json:，并兼容历史 rootcss:/root$. 写法。
-        // 组1: 是否有 root 标记
-        // 组2: 协议 (css:|xpath:|$.|key)
-        // 组3: 表达式
-        val placeholderRegex = Regex("""\{\{\s*(?:(root)\.?)?(css:|xpath:|json:|\$\.|key)(.*?)\s*\}\}""")
-
-        return placeholderRegex.replace(template) { match ->
+        return internalQueryRegex.replace(template) { match ->
             val useRoot = match.groupValues[1] == "root"
             val protocol = match.groupValues[2]
             val expression = match.groupValues[3].trim()
@@ -357,8 +355,7 @@ object RuleParser {
     private fun isEmpty(data: Any?): Boolean = data == null || data == "" || (data is List<*> && data.isEmpty())
 
     fun resolveTemplate(template: String, input: String, ctx: VariableContext): String {
-        val placeholderRegex = Regex("""\{\{\s*([A-Za-z_][\w.-]*|key)\s*\}\}""")
-        return placeholderRegex.replace(template) { match ->
+        return templateRegex.replace(template) { match ->
             val key = match.groupValues[1]
             when {
                 key == "key" -> input
@@ -370,10 +367,12 @@ object RuleParser {
 
     fun String.decodeEscapes(): String {
         if (!contains("\\")) return this
-        return this.replace("\\n", "\n")
+        // 必须先处理 \\\\ → \\，否则后续的 \n/\r/\t 替换会误伤已转义的反斜杠序列
+        return this.replace("\\\\", "\u0000")
+            .replace("\\n", "\n")
             .replace("\\r", "\r")
             .replace("\\t", "\t")
-            .replace("\\\\", "\\")
+            .replace("\u0000", "\\")
     }
 
     fun String.truncate(maxLength: Int, ellipsis: String = "..."): String {

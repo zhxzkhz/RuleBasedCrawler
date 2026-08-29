@@ -19,6 +19,52 @@ abstract class AppDatabase : RoomDatabase() {
 }
 
 /**
+ * v3 -> v4：创建 chapters 表
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("""
+            CREATE TABLE IF NOT EXISTS `chapters` (
+                `bookUrl` TEXT NOT NULL,
+                `url` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `index` INTEGER NOT NULL,
+                `isRead` INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(`bookUrl`, `url`),
+                FOREIGN KEY(`bookUrl`) REFERENCES `books`(`detailUrl`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent())
+    }
+}
+
+/**
+ * v4 -> v5：历史遗留版本，无已知 schema 变更（占位）
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(connection: SQLiteConnection) {
+        // 无 schema 变更，仅桥接版本号
+    }
+}
+
+/**
+ * v5 -> v6：历史遗留版本，无已知 schema 变更（占位）
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(connection: SQLiteConnection) {
+        // 无 schema 变更，仅桥接版本号
+    }
+}
+
+/**
+ * v6 -> v7：历史遗留版本，无已知 schema 变更（占位）
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(connection: SQLiteConnection) {
+        // 无 schema 变更，仅桥接版本号
+    }
+}
+
+/**
  * v7 -> v8：书架自定义分组
  * 1. books 表新增 groupFlags 位掩码列（默认 0 = 未分组）
  * 2. 新建 book_groups 分组定义表（mask 唯一索引）

@@ -26,6 +26,10 @@ object JsEngineRunner {
     private val locks = ConcurrentHashMap<String, ReentrantLock>()
     private val engines = ConcurrentHashMap<String, ScriptEngine>()
 
+    // 记录每个引擎的最后使用时间，用于清理长期未使用的实例
+    private val lastUsedMap = ConcurrentHashMap<String, Long>()
+    private const val ENGINE_TTL_MS = 30 * 60 * 1000L // 30 分钟未使用则清理
+
     private fun createEngine(): ScriptEngine = ENGINE
 
     fun eval(script: String, bindings: Bindings): Any? = eval(null, script, bindings)
@@ -36,6 +40,20 @@ object JsEngineRunner {
         }
         val lock = locks.computeIfAbsent(lockKey) { ReentrantLock() }
         val engine = engines.computeIfAbsent(lockKey) { createEngine() }
+        lastUsedMap[lockKey] = System.currentTimeMillis()
+        // 惰性清理过期引擎
+        cleanupStaleEngines()
         return lock.withLock { engine.eval(script, bindings) }
+    }
+
+    private fun cleanupStaleEngines() {
+        val now = System.currentTimeMillis()
+        lastUsedMap.entries.removeIf { (key, lastUsed) ->
+            if (now - lastUsed > ENGINE_TTL_MS) {
+                locks.remove(key)
+                engines.remove(key)
+                true
+            } else false
+        }
     }
 }
