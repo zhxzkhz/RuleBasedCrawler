@@ -111,6 +111,20 @@ fun RuleManagementScreen(
         }
     }
 
+    fun syncAllSubscriptions() {
+        if (syncingUrl != null) return
+        scope.launch {
+            for (url in subscriptions) {
+                syncingUrl = url
+                val result = runCatching { repository.syncRuleSubscription(url) }.getOrElse {
+                    com.zhhz.spider.repository.RuleSubscriptionResult(0, 0, 0, it.message ?: "同步失败")
+                }
+                snackbarHostState.showSnackbar("订阅同步：${result.toMessage()}")
+            }
+            syncingUrl = null
+        }
+    }
+
     fun saveImportedText(content: String) {
         val parsed = runCatching { safeJson.decodeFromString<SourceRule>(content) }
             .getOrElse { error ->
@@ -371,7 +385,7 @@ fun RuleManagementScreen(
                             enabled = newUrl.isNotBlank()
                         ) { Text("添加") }
                         OutlinedButton(
-                            onClick = { subscriptions.forEach { syncSubscription(it) } },
+                            onClick = { syncAllSubscriptions() },
                             enabled = subscriptions.isNotEmpty() && syncingUrl == null
                         ) { Text("全部同步") }
                     }
