@@ -65,7 +65,16 @@ actual fun AndroidNovelReader(
 
     val scope = rememberCoroutineScope()
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(config.background))) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(config.background))
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    if (textPages.isEmpty()) onToggleMenu()
+                }
+            }
+    ) {
         val constraints = Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight)
         val screenWidth = constraints.maxWidth.toFloat()
 

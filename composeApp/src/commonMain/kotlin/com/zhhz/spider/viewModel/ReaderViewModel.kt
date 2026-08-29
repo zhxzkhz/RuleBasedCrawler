@@ -343,7 +343,12 @@ class ReaderViewModel(
             } catch (e: CancellationException) {
                 throw e // 💡 必须重抛取消信号
             } catch (e: Exception) {
-                updateState { copy(isLoading = false) }
+                updateState {
+                    copy(
+                        content = ChapterContent(blocks = listOf(ChapterBlock(chapterUrl = "", text = "加载失败: ${e.message}", index = index))),
+                        isLoading = false
+                    )
+                }
                 logger.error(e) { "加载失败" }
                 sendEffect(ReaderUiEffect.ShowToast("内容加载失败: ${e.message}"))
             }

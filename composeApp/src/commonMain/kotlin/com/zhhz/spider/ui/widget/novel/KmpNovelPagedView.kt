@@ -85,6 +85,12 @@ fun KmpNovelPagedView(
             .background(Color(config.background))
             .focusRequester(focusRequester)
             .focusable()
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    // 内容为空时也能通过点击弹出菜单
+                    if (textPages.isEmpty()) onToggleMenu()
+                }
+            }
     ) {
         val constraints = Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight)
         val screenWidth = constraints.maxWidth.toFloat()
