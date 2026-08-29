@@ -17,3 +17,16 @@ expect fun NovelReaderEngine(
     onNext: () -> Unit,
     onPrev: () -> Unit
 )
+
+/**
+ * Android 原生阅读器（使用 TextPaint + nativeCanvas 渲染）。
+ * 桌面端为空实现，仅 Android 端有实际实现。
+ */
+@Composable
+expect fun AndroidNovelReader(
+    uiState: ReaderUiState,
+    onProgressUpdate: (Int, Int) -> Unit,
+    onToggleMenu: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit
+)

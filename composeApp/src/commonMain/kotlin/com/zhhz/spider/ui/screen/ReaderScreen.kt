@@ -128,15 +128,27 @@ fun ReaderScreen(
             } else {
                 when (uiState.bookType) {
                     BookType.text -> {
-                        com.zhhz.spider.ui.widget.novel.NovelReaderEngine(
-                            uiState = uiState,
-                            onProgressUpdate = { index, progress ->
-                                viewModel.processIntent(ReaderUiIntent.UpdateReadProgress(index, progress))
-                            },
-                            onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
-                            onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
-                            onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }
-                        )
+                        if (uiState.settings.useAndroidReader && !com.zhhz.spider.isDesktopPlatform()) {
+                            com.zhhz.spider.ui.widget.novel.AndroidNovelReader(
+                                uiState = uiState,
+                                onProgressUpdate = { index, progress ->
+                                    viewModel.processIntent(ReaderUiIntent.UpdateReadProgress(index, progress))
+                                },
+                                onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
+                                onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
+                                onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }
+                            )
+                        } else {
+                            com.zhhz.spider.ui.widget.novel.NovelReaderEngine(
+                                uiState = uiState,
+                                onProgressUpdate = { index, progress ->
+                                    viewModel.processIntent(ReaderUiIntent.UpdateReadProgress(index, progress))
+                                },
+                                onToggleMenu = { viewModel.processIntent(ReaderUiIntent.ToggleMenu) },
+                                onNext = { viewModel.processIntent(ReaderUiIntent.GoNext) },
+                                onPrev = { viewModel.processIntent(ReaderUiIntent.GoPrev) }
+                            )
+                        }
                     }
 
                     BookType.image -> {
@@ -190,7 +202,9 @@ fun ReaderScreen(
                         onLineSpacingChange = { viewModel.processIntent(ReaderUiIntent.ChangeLineSpacing(it)) },
                         onMarginChange = { viewModel.processIntent(ReaderUiIntent.ChangeMargin(it)) },
                         onFontFamilyChange = { viewModel.processIntent(ReaderUiIntent.ChangeFontFamily(it)) },
-                        onBrightnessChange = { viewModel.processIntent(ReaderUiIntent.ChangeBrightness(it)) }
+                        onBrightnessChange = { viewModel.processIntent(ReaderUiIntent.ChangeBrightness(it)) },
+                        useAndroidReader = uiState.settings.useAndroidReader,
+                        onToggleAndroidReader = { viewModel.processIntent(ReaderUiIntent.ToggleAndroidReader(it)) }
                     )
                 } else {
                     ReaderBottomBar(
@@ -234,7 +248,9 @@ fun ReaderSettingsPanel(
     onLineSpacingChange: (Int) -> Unit = {},
     onMarginChange: (Float) -> Unit = {},
     onFontFamilyChange: (String) -> Unit = {},
-    onBrightnessChange: (Float) -> Unit = {}
+    onBrightnessChange: (Float) -> Unit = {},
+    useAndroidReader: Boolean = false,
+    onToggleAndroidReader: (Boolean) -> Unit = {}
 ) {
     val bg = Color(settings.backgroundColor)
     val text = Color(settings.textColor)
@@ -393,6 +409,26 @@ fun ReaderSettingsPanel(
                         modifier = Modifier.weight(2f)
                     )
                     Text("${(settings.brightness * 100).toInt()}%", modifier = Modifier.padding(start = 8.dp), fontSize = 14.sp, color = text)
+                }
+
+                // Android 原生阅读器开关（仅 Android 端显示）
+                if (!com.zhhz.spider.isDesktopPlatform()) {
+                    HorizontalDivider(color = text.copy(alpha = 0.12f), modifier = Modifier.padding(vertical = 10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("原生阅读引擎", style = MaterialTheme.typography.titleSmall, color = text.copy(alpha = 0.85f), modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = useAndroidReader,
+                            onCheckedChange = { onToggleAndroidReader(it) }
+                        )
+                    }
+                    Text(
+                        "开启后使用 Android 原生渲染，性能更好但功能较少",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = text.copy(alpha = 0.5f)
+                    )
                 }
             }
         }

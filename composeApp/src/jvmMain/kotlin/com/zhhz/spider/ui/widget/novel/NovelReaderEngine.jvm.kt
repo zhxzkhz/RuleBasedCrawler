@@ -11,7 +11,24 @@ actual fun NovelReaderEngine(
     onNext: () -> Unit,
     onPrev: () -> Unit
 ) {
-    // 桌面端完全使用纯 Compose 实现的仿真翻页引擎
+    KmpNovelPagedView(
+        uiState = uiState,
+        onProgressUpdate = onProgressUpdate,
+        onToggleMenu = onToggleMenu,
+        onNext = onNext,
+        onPrev = onPrev
+    )
+}
+
+@Composable
+actual fun AndroidNovelReader(
+    uiState: ReaderUiState,
+    onProgressUpdate: (Int, Int) -> Unit,
+    onToggleMenu: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit
+) {
+    // 桌面端无原生阅读器，回退到 KMP 实现
     KmpNovelPagedView(
         uiState = uiState,
         onProgressUpdate = onProgressUpdate,

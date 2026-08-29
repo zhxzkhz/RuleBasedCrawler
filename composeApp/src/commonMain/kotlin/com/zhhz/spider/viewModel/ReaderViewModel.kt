@@ -46,7 +46,8 @@ class ReaderViewModel(
             lineSpacing = saved.readerLineSpacing,
             margin = saved.readerMargin,
             fontFamily = saved.readerFontFamily,
-            brightness = saved.readerBrightness
+            brightness = saved.readerBrightness,
+            useAndroidReader = saved.readerUseAndroidReader
         )
     })
 ) {
@@ -163,6 +164,12 @@ class ReaderViewModel(
                 val pageText = uiState.value.content.blocks.firstOrNull()?.text ?: ""
                 if (pageText.isNotBlank()) {
                     sendEffect(ReaderUiEffect.CopyToClipboard(pageText))
+                }
+            }
+            is ReaderUiIntent.ToggleAndroidReader -> {
+                updateState {
+                    persistSettings { it.copy(readerUseAndroidReader = intent.enabled) }
+                    copy(settings = settings.copy(useAndroidReader = intent.enabled))
                 }
             }
         }
@@ -532,7 +539,8 @@ data class ReaderSettings(
     val lineSpacing: Int = 10,
     val margin: Float = 40f,
     val fontFamily: String = "serif",
-    val brightness: Float = 1.0f
+    val brightness: Float = 1.0f,
+    val useAndroidReader: Boolean = false
 )
 
 data class ReaderUiState(
@@ -601,6 +609,7 @@ sealed class ReaderUiIntent : UiIntent {
     data class ChangeFontFamily(val family: String) : ReaderUiIntent()
     data class ChangeBrightness(val value: Float) : ReaderUiIntent()
     data object CopyCurrentPage : ReaderUiIntent()
+    data class ToggleAndroidReader(val enabled: Boolean) : ReaderUiIntent()
 }
 
 sealed class ReaderUiEffect : UiEffect {

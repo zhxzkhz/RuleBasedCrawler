@@ -51,7 +51,8 @@ class SettingsRepository(
         val readerLineSpacing: Int = 10,
         val readerMargin: Float = 40f,
         val readerFontFamily: String = "serif",
-        val readerBrightness: Float = 1.0f
+        val readerBrightness: Float = 1.0f,
+        val readerUseAndroidReader: Boolean = false
     )
 
     private val file = File(cacheDir, "app_settings.json")
