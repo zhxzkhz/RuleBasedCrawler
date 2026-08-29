@@ -88,7 +88,9 @@ fun ReaderScreen(
         viewModel.processIntent(ReaderUiIntent.Init(bookUrl, chapterIndex, ruleId))
     }
 
-    // 统一处理副作用 (Toast、返回等)
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    // 统一处理副作用 (Toast、返回、剪贴板等)
     LaunchedEffect(Unit) {
         viewModel.uiEffect.collect { effect ->
             when (effect) {
@@ -97,6 +99,11 @@ fun ReaderScreen(
                 is ReaderUiEffect.ShowToast -> {
                     snackbarHostState.currentSnackbarData?.dismiss()
                     launch { snackbarHostState.showSnackbar(effect.message) }
+                }
+                is ReaderUiEffect.CopyToClipboard -> {
+                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(effect.text))
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    launch { snackbarHostState.showSnackbar("已复制当前页内容") }
                 }
             }
         }
@@ -179,7 +186,11 @@ fun ReaderScreen(
                         isManga = uiState.bookType == BookType.image,
                         onFontSizeChange = { delta -> viewModel.processIntent(ReaderUiIntent.ChangeFontSize(delta)) },
                         onChangeTheme = { bg, text -> viewModel.processIntent(ReaderUiIntent.ChangeTheme(bg, text)) },
-                        onChangeMangaMode = { mode -> viewModel.processIntent(ReaderUiIntent.ChangeMangaMode(mode)) }
+                        onChangeMangaMode = { mode -> viewModel.processIntent(ReaderUiIntent.ChangeMangaMode(mode)) },
+                        onLineSpacingChange = { viewModel.processIntent(ReaderUiIntent.ChangeLineSpacing(it)) },
+                        onMarginChange = { viewModel.processIntent(ReaderUiIntent.ChangeMargin(it)) },
+                        onFontFamilyChange = { viewModel.processIntent(ReaderUiIntent.ChangeFontFamily(it)) },
+                        onBrightnessChange = { viewModel.processIntent(ReaderUiIntent.ChangeBrightness(it)) }
                     )
                 } else {
                     ReaderBottomBar(
@@ -203,7 +214,9 @@ fun ReaderScreen(
                         },
                         onChangeChapter = { index ->
                             viewModel.processIntent(ReaderUiIntent.ChangeChapter(index))
-                        }
+                        },
+                        showCopy = uiState.bookType == BookType.text,
+                        onCopy = { viewModel.processIntent(ReaderUiIntent.CopyCurrentPage) }
                     )
                 }
             }
@@ -217,7 +230,11 @@ fun ReaderSettingsPanel(
     isManga: Boolean,
     onFontSizeChange: (Int) -> Unit,
     onChangeTheme: (Long, Long) -> Unit,
-    onChangeMangaMode: (String) -> Unit
+    onChangeMangaMode: (String) -> Unit,
+    onLineSpacingChange: (Int) -> Unit = {},
+    onMarginChange: (Float) -> Unit = {},
+    onFontFamilyChange: (String) -> Unit = {},
+    onBrightnessChange: (Float) -> Unit = {}
 ) {
     val bg = Color(settings.backgroundColor)
     val text = Color(settings.textColor)
@@ -306,6 +323,77 @@ fun ReaderSettingsPanel(
                     style = MaterialTheme.typography.labelSmall,
                     color = text.copy(alpha = 0.5f)
                 )
+            }
+
+            // 小说专属设置
+            if (!isManga) {
+                HorizontalDivider(color = text.copy(alpha = 0.12f), modifier = Modifier.padding(vertical = 10.dp))
+
+                // 字体选择
+                Text("字体", style = MaterialTheme.typography.titleSmall, color = text.copy(alpha = 0.85f))
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val fontOptions = listOf("serif" to "宋体", "sans-serif" to "黑体", "monospace" to "等宽")
+                    fontOptions.forEach { (value, label) ->
+                        FilterChip(
+                            selected = settings.fontFamily == value,
+                            onClick = { onFontFamilyChange(value) },
+                            label = { Text(label, fontSize = 13.sp) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // 行距
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("行距", style = MaterialTheme.typography.titleSmall, color = text.copy(alpha = 0.85f), modifier = Modifier.weight(1f))
+                    Slider(
+                        value = settings.lineSpacing.toFloat(),
+                        onValueChange = { onLineSpacingChange(it.toInt()) },
+                        valueRange = 5f..30f,
+                        steps = 24,
+                        modifier = Modifier.weight(2f)
+                    )
+                    Text("${settings.lineSpacing}", modifier = Modifier.padding(start = 8.dp), fontSize = 14.sp, color = text)
+                }
+
+                // 页边距
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("边距", style = MaterialTheme.typography.titleSmall, color = text.copy(alpha = 0.85f), modifier = Modifier.weight(1f))
+                    Slider(
+                        value = settings.margin,
+                        onValueChange = { onMarginChange(it) },
+                        valueRange = 10f..80f,
+                        modifier = Modifier.weight(2f)
+                    )
+                    Text("${settings.margin.toInt()}", modifier = Modifier.padding(start = 8.dp), fontSize = 14.sp, color = text)
+                }
+
+                // 亮度
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("亮度", style = MaterialTheme.typography.titleSmall, color = text.copy(alpha = 0.85f), modifier = Modifier.weight(1f))
+                    Slider(
+                        value = settings.brightness,
+                        onValueChange = { onBrightnessChange(it) },
+                        valueRange = 0.3f..1f,
+                        modifier = Modifier.weight(2f)
+                    )
+                    Text("${(settings.brightness * 100).toInt()}%", modifier = Modifier.padding(start = 8.dp), fontSize = 14.sp, color = text)
+                }
             }
         }
     }
@@ -426,7 +514,9 @@ fun ReaderBottomBar(
     onOpenSettings: () -> Unit = {},
     showReloadChapter: Boolean = false,
     onReloadChapter: () -> Unit = {},
-    onChangeChapter: (Int) -> Unit = {} // 快速跳章滑条回调
+    onChangeChapter: (Int) -> Unit = {},
+    showCopy: Boolean = false,
+    onCopy: () -> Unit = {}
 ) {
     val progress = if (totalChapters > 0) {
         ((currentIndex + 1).coerceIn(0, totalChapters)).toFloat() / totalChapters
@@ -513,6 +603,16 @@ fun ReaderBottomBar(
                     modifier = Modifier.weight(1f),
                     onClick = onOpenSettings
                 )
+                if (showCopy) {
+                    BottomAction(
+                        icon = { Text("📋", fontSize = 18.sp) },
+                        label = "复制",
+                        enabled = true,
+                        tint = contentColor,
+                        modifier = Modifier.weight(1f),
+                        onClick = onCopy
+                    )
+                }
                 if (showReloadChapter) {
                     BottomAction(
                         icon = { Icon(painterResource(Res.drawable.refresh_24px), null, modifier = Modifier.size(22.dp)) },

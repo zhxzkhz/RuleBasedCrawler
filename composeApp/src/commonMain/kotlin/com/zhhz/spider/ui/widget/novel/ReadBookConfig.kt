@@ -29,4 +29,8 @@ data class ReadBookConfig(
     val ignoreFirstEmptyLine: Boolean = true,
     //忽略每页尾行空白行
     val ignoreLastEmptyLine: Boolean = true,
+    //字体：serif / sans-serif / monospace
+    val fontFamily: String = "serif",
+    //亮度：0.3~1.0，1.0表示跟随系统
+    val brightness: Float = 1.0f,
 )

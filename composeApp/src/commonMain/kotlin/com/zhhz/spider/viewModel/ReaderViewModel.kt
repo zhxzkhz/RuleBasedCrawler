@@ -42,7 +42,11 @@ class ReaderViewModel(
             fontSize = saved.readerFontSize,
             backgroundColor = saved.readerBackground,
             textColor = saved.readerTextColor,
-            mangaMode = saved.readerMangaMode
+            mangaMode = saved.readerMangaMode,
+            lineSpacing = saved.readerLineSpacing,
+            margin = saved.readerMargin,
+            fontFamily = saved.readerFontFamily,
+            brightness = saved.readerBrightness
         )
     })
 ) {
@@ -131,6 +135,36 @@ class ReaderViewModel(
                 }
             }
             is ReaderUiIntent.RetryFetchChapter -> handleRetryFetchChapter(intent.chapterUrl, intent.index)
+            is ReaderUiIntent.ChangeLineSpacing -> {
+                updateState {
+                    persistSettings { it.copy(readerLineSpacing = intent.value) }
+                    copy(settings = settings.copy(lineSpacing = intent.value))
+                }
+            }
+            is ReaderUiIntent.ChangeMargin -> {
+                updateState {
+                    persistSettings { it.copy(readerMargin = intent.value) }
+                    copy(settings = settings.copy(margin = intent.value))
+                }
+            }
+            is ReaderUiIntent.ChangeFontFamily -> {
+                updateState {
+                    persistSettings { it.copy(readerFontFamily = intent.family) }
+                    copy(settings = settings.copy(fontFamily = intent.family))
+                }
+            }
+            is ReaderUiIntent.ChangeBrightness -> {
+                updateState {
+                    persistSettings { it.copy(readerBrightness = intent.value) }
+                    copy(settings = settings.copy(brightness = intent.value))
+                }
+            }
+            is ReaderUiIntent.CopyCurrentPage -> {
+                val pageText = uiState.value.content.blocks.firstOrNull()?.text ?: ""
+                if (pageText.isNotBlank()) {
+                    sendEffect(ReaderUiEffect.CopyToClipboard(pageText))
+                }
+            }
         }
     }
 
@@ -494,7 +528,11 @@ data class ReaderSettings(
     val backgroundColor: Long = 0xFFFAF7F0,
     val textColor: Long = 0xFF333333,
     // 漫画阅读模式："webtoon" 条滑 / "paged" 翻页 / "rtl" 日漫右开
-    val mangaMode: String = "webtoon"
+    val mangaMode: String = "webtoon",
+    val lineSpacing: Int = 10,
+    val margin: Float = 40f,
+    val fontFamily: String = "serif",
+    val brightness: Float = 1.0f
 )
 
 data class ReaderUiState(
@@ -558,10 +596,16 @@ sealed class ReaderUiIntent : UiIntent {
     data object NavigateBack : ReaderUiIntent()
 
     data class UpdateReadProgress(val index: Int, val progress: Int = 0) : ReaderUiIntent()
+    data class ChangeLineSpacing(val value: Int) : ReaderUiIntent()
+    data class ChangeMargin(val value: Float) : ReaderUiIntent()
+    data class ChangeFontFamily(val family: String) : ReaderUiIntent()
+    data class ChangeBrightness(val value: Float) : ReaderUiIntent()
+    data object CopyCurrentPage : ReaderUiIntent()
 }
 
 sealed class ReaderUiEffect : UiEffect {
     data class ShowToast(val message: String) : ReaderUiEffect()
     object NavigateBack : ReaderUiEffect()
     data class NavigateToCatalogPage(val bookUrl: String, val ruleId: String) : ReaderUiEffect()
+    data class CopyToClipboard(val text: String) : ReaderUiEffect()
 }

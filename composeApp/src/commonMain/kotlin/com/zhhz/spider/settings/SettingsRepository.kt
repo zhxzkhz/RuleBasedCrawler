@@ -46,7 +46,12 @@ class SettingsRepository(
         // 上次自动检查更新的时间戳（节流：间隔不足则不自动刷新）
         val lastUpdateCheckAt: Long = 0,
         // 是否允许自动更新“未分组”的书籍（默认 true）
-        val updateUngroupedBooks: Boolean = true
+        val updateUngroupedBooks: Boolean = true,
+        // ---------------- 阅读器扩展 ----------------
+        val readerLineSpacing: Int = 10,
+        val readerMargin: Float = 40f,
+        val readerFontFamily: String = "serif",
+        val readerBrightness: Float = 1.0f
     )
 
     private val file = File(cacheDir, "app_settings.json")

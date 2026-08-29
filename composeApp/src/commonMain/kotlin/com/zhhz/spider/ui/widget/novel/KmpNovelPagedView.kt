@@ -3,6 +3,7 @@
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,12 +18,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.sp
@@ -54,12 +63,29 @@ fun KmpNovelPagedView(
     val config = ReadBookConfig(
         textColorArgb = uiState.settings.textColor.toInt(),
         background = uiState.settings.backgroundColor.toInt(),
-        textSize = uiState.settings.fontSize
+        textSize = uiState.settings.fontSize,
+        lineSpacing = uiState.settings.lineSpacing,
+        margin = uiState.settings.margin,
+        fontFamily = uiState.settings.fontFamily,
+        brightness = uiState.settings.brightness
     )
-    val textStyle = TextStyle(color = Color(config.textColorArgb), fontSize = config.textSize.sp)
-    val scope = rememberCoroutineScope()
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(config.background))) {
+    val fontFamily = when (config.fontFamily) {
+        "sans-serif" -> FontFamily.SansSerif
+        "monospace" -> FontFamily.Monospace
+        else -> FontFamily.Serif
+    }
+    val textStyle = TextStyle(color = Color(config.textColorArgb), fontSize = config.textSize.sp, fontFamily = fontFamily)
+    val scope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(config.background))
+            .focusRequester(focusRequester)
+            .focusable()
+    ) {
         val constraints = Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight)
         val screenWidth = constraints.maxWidth.toFloat()
 
@@ -75,6 +101,29 @@ fun KmpNovelPagedView(
                 pageCount = { textPages.size }
             )
 
+            // 键盘翻页：在 pagerState 可用后绑定键盘事件
+            LaunchedEffect(pagerState, textPages.size) {
+                focusRequester.requestFocus()
+            }
+
+            fun turnPage(forward: Boolean) {
+                val target = pagerState.currentPage + if (forward) 1 else -1
+                if (target in 0 until textPages.size) {
+                    scope.launch { pagerState.animateScrollToPage(target) }
+                } else if (forward) {
+                    onNext()
+                } else {
+                    onPrev()
+                }
+            }
+
+            // 音量键翻页（Android）
+            com.zhhz.spider.VolumeKeyPageEffect(
+                enabled = true,
+                onForward = { turnPage(true) },
+                onBackward = { turnPage(false) }
+            )
+
             // 进度上报与翻页
             LaunchedEffect(pagerState, uiState.hasNext) {
                 androidx.compose.runtime.snapshotFlow { pagerState.currentPage }
@@ -87,25 +136,38 @@ fun KmpNovelPagedView(
 
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        val target = when {
-                            offset.x < screenWidth / 3 -> pagerState.currentPage - 1
-                            offset.x > screenWidth * 2 / 3 -> pagerState.currentPage + 1
-                            else -> {
-                                onToggleMenu()
-                                return@detectTapGestures
-                            }
-                        }
-                        if (target in 0 until textPages.size) {
-                            scope.launch { pagerState.animateScrollToPage(target) }
-                        } else if (target < 0) {
-                            onPrev()
-                        } else {
-                            onNext()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionRight -> { turnPage(true); true }
+                            Key.DirectionLeft -> { turnPage(false); true }
+                            Key.PageDown, Key.DirectionDown -> { turnPage(true); true }
+                            Key.PageUp, Key.DirectionUp -> { turnPage(false); true }
+                            Key.Home -> { scope.launch { pagerState.scrollToPage(0) }; true }
+                            else -> false
                         }
                     }
-                }
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            val target = when {
+                                offset.x < screenWidth / 3 -> pagerState.currentPage - 1
+                                offset.x > screenWidth * 2 / 3 -> pagerState.currentPage + 1
+                                else -> {
+                                    onToggleMenu()
+                                    return@detectTapGestures
+                                }
+                            }
+                            if (target in 0 until textPages.size) {
+                                scope.launch { pagerState.animateScrollToPage(target) }
+                            } else if (target < 0) {
+                                onPrev()
+                            } else {
+                                onNext()
+                            }
+                        }
+                    }
             ) { pageIndex ->
                 val page = textPages[pageIndex]
                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -113,7 +175,6 @@ fun KmpNovelPagedView(
                     val header = textMeasurer.measure("我", textStyle).size.height * 0.85f
                     var curY = marginPx + header
 
-                    // 💡 优化 PC 端小标题/页码的字体大小，保证最小可读性，并且不要跟随正文放得太大
                     val smallTextSize = (config.textSize * 0.7f).coerceIn(11f, 15f).sp
                     val smallTextStyle = textStyle.copy(
                         fontSize = smallTextSize,
@@ -127,7 +188,7 @@ fun KmpNovelPagedView(
                         topLeft = Offset(marginPx, marginPx * 0.4f),
                         style = smallTextStyle
                     )
-                    
+
                     // 绘制右下角阅读进度
                     val progressText = "${pageIndex + 1}/${textPages.size}"
                     val progressLayout = textMeasurer.measure(progressText, smallTextStyle)
@@ -135,7 +196,7 @@ fun KmpNovelPagedView(
                         textMeasurer = textMeasurer,
                         text = progressText,
                         topLeft = Offset(
-                            size.width - marginPx - progressLayout.size.width, 
+                            size.width - marginPx - progressLayout.size.width,
                             size.height - marginPx * 0.4f - progressLayout.size.height
                         ),
                         style = smallTextStyle
@@ -156,8 +217,18 @@ fun KmpNovelPagedView(
                         }
                         curY += textLine.height + textLine.extraHeight
                     }
+
+                    // 亮度控制：叠加半透明黑色遮罩
+                    if (config.brightness < 1.0f) {
+                        drawRect(
+                            color = Color.Black.copy(alpha = 1f - config.brightness),
+                            size = size
+                        )
+                    }
                 }
             }
+
+            LaunchedEffect(Unit) { focusRequester.requestFocus() }
         } else {
             androidx.compose.foundation.layout.Box(
                 modifier = Modifier.fillMaxSize(),
