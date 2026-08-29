@@ -10,9 +10,14 @@ import com.zhhz.spider.util.JsExtensionClass
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import java.net.InetSocketAddress
+import java.net.Proxy
 import javax.script.SimpleBindings
 
 private val logger = KotlinLogging.logger {}
+
+// 专用调度器：避免 Coil 主线程调用时阻塞 Dispatchers.IO 通用池
+private val mangaCallDispatcher = Dispatchers.IO.limitedParallelism(2)
 
 class MangaCallFactory(
     private val httpFetcher: HttpFetcher,
@@ -25,8 +30,8 @@ class MangaCallFactory(
         val ruleId = request.headers["X-Internal-Rule-Id"]
 
         val (ctx, rule) = ruleId?.let { id ->
-            // 采用标准同步锁机制，或使用 runBlocking，但必须指定 Dispatchers.IO 避开主线程
-            runBlocking(Dispatchers.IO) {
+            // 采用专用调度器，避免阻塞通用 IO 线程池和主线程
+            runBlocking(mangaCallDispatcher) {
                 val context = contextSessionManager.getActiveContext(sessionRepository,id)
                 val activeRule = ruleRepository.getEnabledRules().find { it.id == id }
 
@@ -68,7 +73,17 @@ class MangaCallFactory(
         }
 
         val client = if (!ruleId.isNullOrBlank()) {
-            httpFetcher.getExistingClient(ruleId) ?: httpFetcher.baseClient
+            httpFetcher.getExistingClient(ruleId)
+                ?: rule?.let { r ->
+                    val proxy = r.proxyUrl?.takeIf { it.contains(":") }?.let {
+                        try {
+                            val parts = it.split(":")
+                            Proxy(Proxy.Type.HTTP, InetSocketAddress(parts[0], parts[1].toInt()))
+                        } catch (_: Exception) { null }
+                    }
+                    httpFetcher.getOrCreateClient(ruleId, proxy, r.customDns)
+                }
+                ?: httpFetcher.baseClient
         } else {
             httpFetcher.baseClient
         }

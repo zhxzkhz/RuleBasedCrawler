@@ -556,6 +556,8 @@ private fun CommentsSheet(
     }
 }
 
+private const val MAX_COMMENT_DEPTH = 5
+
 /** 单条评论卡片：有回复时默认折叠，点击「展开/收起 N 条回复」切换；长按内容复制全文 */
 @Composable
 private fun CommentCard(
@@ -623,7 +625,7 @@ private fun CommentCard(
                 )
             }
 
-            if (expanded) {
+            if (expanded && depth < MAX_COMMENT_DEPTH) {
                 Spacer(modifier = Modifier.height(4.dp))
                 comment.replys.forEach { reply ->
                     CommentCard(
@@ -633,6 +635,13 @@ private fun CommentCard(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                 }
+            } else if (expanded && depth >= MAX_COMMENT_DEPTH && comment.replys.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "嵌套层级过深，已折叠 ${comment.replys.size} 条回复",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

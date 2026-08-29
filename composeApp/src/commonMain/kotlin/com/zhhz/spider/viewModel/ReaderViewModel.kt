@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import java.util.concurrent.ConcurrentHashMap
 
 private val logger = KotlinLogging.logger {}
 
@@ -61,11 +62,11 @@ class ReaderViewModel(
         viewModelScope.launch { runCatching { settingsRepository.save(snapshot) } }
     }
 
-    private var saveChapterIndex = 0
+    @Volatile private var saveChapterIndex = 0
 
-    private var saveChapterProgress = 0
+    @Volatile private var saveChapterProgress = 0
 
-    private val chapterJobs = mutableMapOf<String, Deferred<ChapterBlock>>()
+    private val chapterJobs = ConcurrentHashMap<String, Deferred<ChapterBlock>>()
     private var saveProgressJob: Job? = null
 
     override fun handleIntent(intent: ReaderUiIntent) {
@@ -239,7 +240,7 @@ class ReaderViewModel(
 
         viewModelScope.launch {
             try {
-                val deferred = chapterJobs.getOrPut(url) {
+                val deferred = chapterJobs.computeIfAbsent(url) {
                     viewModelScope.async(Dispatchers.IO) {
                         logger.info { "加载URL $url" }
                         readerRepository.fetchData(url, ruleId, uiState.value.bookUrl)

@@ -37,7 +37,10 @@ class FileSnapshotInterceptor(private val cacheDir: File) : Interceptor {
 
         if (response.isSuccessful) {
             val bytes = response.body.bytes()
-            cacheFile.writeBytes(bytes)
+            // 原子写入：先写临时文件再 rename，防止崩溃时产生损坏缓存
+            val tmpFile = File(cacheFile.parent, cacheFile.name + ".tmp")
+            tmpFile.writeBytes(bytes)
+            tmpFile.renameTo(cacheFile)
             return response.newBuilder().body(bytes.toResponseBody(response.body.contentType())).build()
         }
         return response

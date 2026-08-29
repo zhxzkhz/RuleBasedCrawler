@@ -90,7 +90,11 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
         return clientRegistry[sourceId]
     }
 
-    private fun getOrCreateClient(sourceId: String, currentProxy: Proxy?, dnsConfig: String?): OkHttpClient {
+    /**
+     * 获取或创建带代理/DNS 配置的 Client。
+     * 如果缓存中已有且配置未变，直接返回；否则按给定配置重建。
+     */
+    fun getOrCreateClient(sourceId: String, currentProxy: Proxy?, dnsConfig: String?): OkHttpClient {
         val currentFingerprint = Objects.hash(currentProxy, dnsConfig)
 
         val cachedClient = clientRegistry[sourceId]

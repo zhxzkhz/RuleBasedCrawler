@@ -8,6 +8,7 @@ import cn.hutool.crypto.symmetric.SymmetricCrypto
 import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.TypeReference
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import okhttp3.Headers.Companion.toHeaders
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -22,14 +23,22 @@ import org.mozilla.javascript.Undefined
 import org.mozilla.javascript.Wrapper
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
-import java.lang.Thread.sleep
 import java.security.spec.AlgorithmParameterSpec
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
-import kotlin.concurrent.thread
 
 
 private val logger = KotlinLogging.logger {}
+
+// 专用调度器：限制 JS 脚本发起的 HTTP 并发数，防止阻塞通用 IO 线程池
+private val jsHttpDispatcher = Dispatchers.IO.limitedParallelism(4)
+
+// 定时线程池：替代每次 timeout 调用都创建新线程的做法，限制最大并发为 4
+private val timeoutScheduler = Executors.newScheduledThreadPool(4) { r ->
+    Thread(r, "js-timeout-worker").apply { isDaemon = true }
+}
 
 object JsExtensionClass {
 
@@ -249,13 +258,11 @@ object JsExtensionClass {
             ) as HashMap<String, String>).toHeaders()
         )
 
-        return runBlocking {
+        return runBlocking(jsHttpDispatcher) {
             kotlin.runCatching {
                 okHttpClient.newCall(builder.build()).execute().body.string()
             }.onFailure {
-                //log("ajax(${url}) error\n${it.localizedMessage}
-                it.printStackTrace()
-                logger.warn { it.message }
+                logger.warn { "ajax($url) error: ${it.message}" }
             }.getOrElse {
                 val byteArrayOutputStream = ByteArrayOutputStream()
                 it.printStackTrace(PrintStream(byteArrayOutputStream))
@@ -265,11 +272,8 @@ object JsExtensionClass {
 
     }
 
-    fun timeout(runnable: Runnable ,long: Long){
-        thread(start =true) {
-            sleep(long)
-            runnable.run()
-        }
+    fun timeout(runnable: Runnable, long: Long) {
+        timeoutScheduler.schedule(runnable, long, TimeUnit.MILLISECONDS)
     }
 
     fun md5(
@@ -369,7 +373,7 @@ object JsExtensionClass {
         paddings: String = "AES/CBC/PKCS5Padding",
         iv: String
     ): String? {
-        return crypt(str, key, "AES", paddings, iv, false)?.let { String(it) }
+        return crypt(str, key, "AES", paddings, iv, true)?.let { String(it) }
     }
 
     /**

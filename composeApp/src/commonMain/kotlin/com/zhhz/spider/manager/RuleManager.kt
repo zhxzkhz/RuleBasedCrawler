@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class RuleManager(private val ruleDao: RuleDao) {
-    // 1. 用一个普通的变量作为“缓存池”，StateFlow 只用来通知界面
-    private var activeRule: SourceRule? = null
+    // 1. 用一个普通的变量作为”缓存池”，StateFlow 只用来通知界面
+    @Volatile private var activeRule: SourceRule? = null
 
     // 2. 界面订阅用 Flow
     private val _currentRuleFlow = MutableStateFlow<SourceRule?>(null)

@@ -6,9 +6,9 @@ import com.zhhz.spider.network.SearchBook
 
 // 纯粹的内存数据持有者
 class BookSessionManager {
-    private var _currentSearchBook: Book? = null
+    @Volatile private var _currentSearchBook: Book? = null
 
-    private var _currentCatalog: List<Chapter> = emptyList()
+    @Volatile private var _currentCatalog: List<Chapter> = emptyList()
 
     fun setCurrentBook(book: Book) {
         val previous = _currentSearchBook

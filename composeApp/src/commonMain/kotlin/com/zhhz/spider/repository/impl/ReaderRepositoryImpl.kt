@@ -39,6 +39,13 @@ class ReaderRepositoryImpl(
 
     private val textCacheDirectory: Path = get(Path::class.java, named("bookCacheDir"))
 
+    /** 原子写入：先写临时文件再 rename，防止崩溃时产生损坏缓存 */
+    private fun atomicWrite(target: Path, content: String) {
+        val tmp = target.parent!! / "${target.name}.tmp"
+        fileSystem.write(tmp) { writeUtf8(content) }
+        fileSystem.atomicMove(tmp, target)
+    }
+
     // 💡 1. 统一命名：通过 fetchData 加载章节内容
     override suspend fun fetchData(chapterUrl: String, ruleId: String, bookUrl: String?): ChapterBlock {
         return withContext(Dispatchers.IO) {
@@ -98,10 +105,8 @@ class ReaderRepositoryImpl(
                 }
 
                 if (isBookInLibrary && imageUrls.isNotEmpty()) {
-                    val serializedJson = Json.encodeToString(imageUrls) // 序列化
-                    fileSystem.write(cacheFile) {
-                        writeUtf8(serializedJson) // 写入磁盘
-                    }
+                    val serializedJson = Json.encodeToString(imageUrls)
+                    atomicWrite(cacheFile, serializedJson)
                 }
 
                 ChapterBlock(
@@ -117,9 +122,7 @@ class ReaderRepositoryImpl(
                 }.trimEnd()
 
                 if (isBookInLibrary && textContent.isNotBlank()) {
-                    fileSystem.write(cacheFile) {
-                        writeUtf8(textContent) // 写入磁盘
-                    }
+                    atomicWrite(cacheFile, textContent)
                 }
 
                 ChapterBlock(

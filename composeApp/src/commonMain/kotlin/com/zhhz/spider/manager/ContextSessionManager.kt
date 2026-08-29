@@ -2,8 +2,12 @@ package com.zhhz.spider.manager
 
 import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.rule.VariableContext
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.Collections
+
+private val logger = KotlinLogging.logger {}
 
 class ContextSessionManager(private val maxEntries: Int = 50) {
 
@@ -21,10 +25,11 @@ class ContextSessionManager(private val maxEntries: Int = 50) {
             keyOrder.add(key)
             existingCtx
         } else {
-            val newCtx: VariableContext = ruleId
-                ?.let { sessions[it] }
-                ?.toMutableMap()
-                ?: mutableMapOf()
+            val sourceCtx = ruleId?.let { sessions[it] }
+            // 使用线程安全 Map 包装，允许多协程并发读写（如 Cookie 同步）
+            val newCtx: VariableContext = Collections.synchronizedMap(
+                sourceCtx?.toMutableMap() ?: mutableMapOf()
+            )
             sessions[key] = newCtx
             keyOrder.add(key)
             pruneCacheIfNeeded()
@@ -38,18 +43,14 @@ class ContextSessionManager(private val maxEntries: Int = 50) {
      * 这样既继承了搜索阶段的 Cookie，又保证了不同书籍之间会话的物理隔离！
      */
     suspend fun forkContext(fromKey: String, bookUrl: String) = lock.withLock {
-        // 💡 幂等保护：如果目标书本的会话已经在缓存里了（说明之前在详情页已经派生过）
-        // 直接拦截，拒绝重复克隆，完美保护现有的阅读会话状态！
         if (sessions.containsKey(bookUrl)) return@withLock
         val sourceCtx = sessions[fromKey]
         if (sourceCtx != null) {
-            // 💡 执行深拷贝，生成全新的 Map 实例
-            sessions[bookUrl] = sourceCtx.toMutableMap()
-            // 更新 LRU 队列
+            sessions[bookUrl] = Collections.synchronizedMap(sourceCtx.toMutableMap())
             keyOrder.remove(bookUrl)
             keyOrder.add(bookUrl)
             pruneCacheIfNeeded()
-            println("LRU Cache: 成功为书本 [${bookUrl.takeLast(10)}] 分支派生会话，继承自 [${fromKey}]")
+            logger.debug { "LRU Cache: 成功为书本 [${bookUrl.takeLast(10)}] 分支派生会话，继承自 [$fromKey]" }
         }
     }
 
@@ -64,7 +65,7 @@ class ContextSessionManager(private val maxEntries: Int = 50) {
         if (sessions.size > maxEntries) {
             val oldestKey = keyOrder.removeAt(0)
             sessions.remove(oldestKey)
-            println("LRU Cache: 容量满，自动淘汰最老数据 [$oldestKey]")
+            logger.debug { "LRU Cache: 容量满，自动淘汰最老数据 [$oldestKey]" }
         }
     }
 }
