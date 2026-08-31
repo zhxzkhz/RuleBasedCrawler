@@ -530,7 +530,8 @@ private fun CommentsSheet(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        itemsIndexed(uiState.comments) { index, comment ->
+                        //itemsIndexed(uiState.comments) { index, comment ->
+                            items(uiState.comments, key = { it.hashCode() }) { comment ->
                             CommentCard(
                                 comment = comment,
                                 depth = 0,

@@ -6,8 +6,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 private val logger = KotlinLogging.logger {}
 
 actual fun platformRecover(thread: Thread, throwable: Throwable) {
-    // 主线程异常被吞掉后消息循环已停止，重启 Looper 防止 UI 冻结，
-    // 让用户能看到错误提示框并继续操作
+    // 主线程异常被吞掉后消息循环已停止，重启 Looper 防止 UI 冻结。
     if (thread == Looper.getMainLooper().thread) {
         while (true) {
             try {
@@ -18,4 +17,8 @@ actual fun platformRecover(thread: Thread, throwable: Throwable) {
             }
         }
     }
+}
+
+actual fun platformInstallExceptionBoundary(onError: (Throwable) -> Unit) {
+    // Android 的主线程异常由 platformRecover 负责恢复消息循环。
 }
