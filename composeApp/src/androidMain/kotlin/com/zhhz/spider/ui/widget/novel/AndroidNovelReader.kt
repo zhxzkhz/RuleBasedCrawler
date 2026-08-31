@@ -24,8 +24,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.platform.LocalClipboardManager
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
 import com.zhhz.spider.ui.widget.novel.android.AndroidReadProvider
 import com.zhhz.spider.ui.widget.novel.android.textHeight
 import com.zhhz.spider.viewModel.ReaderUiState
@@ -157,9 +157,20 @@ actual fun AndroidNovelReader(
                     for (textLine in page.textLines) {
                         curY += textLine.height
                         for (element in textLine.elements) {
-                            if (element is NovelElement.TextRun) {
-                                if (element.text.isNotBlank() && element.text != "\n") {
-                                    nativeCanvas.drawText(element.text, element.rect.left, curY, textPaint)
+                            when (element) {
+                                is NovelElement.TextRun -> {
+                                    if (element.text.isNotBlank() && element.text != "\n") {
+                                        nativeCanvas.drawText(element.text, element.rect.left, curY, textPaint)
+                                    }
+                                }
+                                is NovelElement.Illustration -> {
+                                    // 插图占位区域：画个浅灰底标明"bgsylu"
+                                    val illustHeight = textPaint.textHeight * 3 + marginPx
+                                    drawRect(
+                                        color = Color.LightGray.copy(alpha = 0.3f),
+                                        topLeft = Offset(element.rect.left.coerceAtLeast(0f), curY - marginPx),
+                                        size = androidx.compose.ui.geometry.Size(size.width - marginPx * 2, illustHeight)
+                                    )
                                 }
                             }
                         }
