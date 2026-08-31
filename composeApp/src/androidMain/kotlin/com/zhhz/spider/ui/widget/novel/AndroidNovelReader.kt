@@ -17,15 +17,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.runtime.rememberCoroutineScope
-import coil3.compose.rememberAsyncImagePainter
-import coil3.request.ImageRequest
 import com.zhhz.spider.ui.widget.novel.android.AndroidReadProvider
 import com.zhhz.spider.ui.widget.novel.android.textHeight
 import com.zhhz.spider.viewModel.ReaderUiState
@@ -121,6 +123,15 @@ actual fun AndroidNovelReader(
                 }
             ) { pageIndex ->
                 val page = textPages[pageIndex]
+
+                // 收集当前页所有插图 URL，预加载到缓存
+                val illustrationUrls = remember(pageIndex, textPages) {
+                    page.textLines.flatMap { line ->
+                        line.elements.filterIsInstance<NovelElement.Illustration>().map { it.url }
+                    }.distinct()
+                }
+                val illustrationBitmaps = rememberIllustrations(illustrationUrls)
+
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val nativeCanvas = drawContext.canvas.nativeCanvas
                     val textPaint = AndroidReadProvider.textPaint
@@ -164,12 +175,16 @@ actual fun AndroidNovelReader(
                                     }
                                 }
                                 is NovelElement.Illustration -> {
-                                    // 插图占位区域：画个浅灰底标明"bgsylu"
+                                    // 插图区域：绘制已加载的位图，未加载时画占位灰块
+                                    val illustTop = curY - marginPx
                                     val illustHeight = textPaint.textHeight * 3 + marginPx
-                                    drawRect(
-                                        color = Color.LightGray.copy(alpha = 0.3f),
-                                        topLeft = Offset(element.rect.left.coerceAtLeast(0f), curY - marginPx),
-                                        size = androidx.compose.ui.geometry.Size(size.width - marginPx * 2, illustHeight)
+                                    val illustWidth = size.width - marginPx * 2
+
+                                    drawIllustration(
+                                        url = element.url,
+                                        topLeft = Offset(marginPx, illustTop),
+                                        size = androidx.compose.ui.geometry.Size(illustWidth, illustHeight),
+                                        bitmap = illustrationBitmaps[element.url]
                                     )
                                 }
                             }
