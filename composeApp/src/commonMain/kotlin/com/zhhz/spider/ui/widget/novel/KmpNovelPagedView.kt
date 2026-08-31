@@ -85,9 +85,10 @@ fun KmpNovelPagedView(
             .background(Color(config.background))
             .focusRequester(focusRequester)
             .focusable()
-            .pointerInput(Unit) {
+            // 菜单打开时不响应翻页手势（包括点击翻页、滑动手势等）
+            .pointerInput(uiState.isMenuVisible) {
+                if (uiState.isMenuVisible) return@pointerInput
                 detectTapGestures {
-                    // 内容为空时也能通过点击弹出菜单
                     if (textPages.isEmpty()) onToggleMenu()
                 }
             }
@@ -123,11 +124,11 @@ fun KmpNovelPagedView(
                 }
             }
 
-            // 音量键翻页（Android）
+            // 音量键翻页（Android）：上=上一页，下=下一页
             com.zhhz.spider.VolumeKeyPageEffect(
                 enabled = true,
-                onForward = { turnPage(true) },
-                onBackward = { turnPage(false) }
+                onForward = { turnPage(false) },
+                onBackward = { turnPage(true) }
             )
 
             // 进度上报与翻页
