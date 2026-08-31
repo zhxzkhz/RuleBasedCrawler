@@ -13,6 +13,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 
 fun main() = application {
+    // 尽早安装全局错误捕获，覆盖启动阶段
+    com.zhhz.spider.util.GlobalErrorHandler.install()
     Window(
         onCloseRequest = ::exitApplication,
         title = "RuleBasedCrawler",

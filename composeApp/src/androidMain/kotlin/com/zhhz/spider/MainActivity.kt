@@ -24,6 +24,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 尽早安装全局错误捕获，覆盖启动阶段
+        com.zhhz.spider.util.GlobalErrorHandler.install()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 

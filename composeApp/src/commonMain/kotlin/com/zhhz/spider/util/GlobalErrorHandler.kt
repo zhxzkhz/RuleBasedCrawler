@@ -39,6 +39,7 @@ object GlobalErrorHandler {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             logger.error(throwable) { "全局未捕获异常 thread=${thread.name}" }
             report(throwable)
+            platformRecover(thread, throwable)
             // 不再调用 previousHandler / System.exit，进程保持存活
         }
     }
@@ -61,3 +62,9 @@ object GlobalErrorHandler {
         _currentError.value = null
     }
 }
+
+/**
+ * 平台特定的异常后恢复逻辑。
+ * Android 主线程异常被吞掉后消息循环会停止，需要重启 Looper 防止 UI 冻结。
+ */
+expect fun platformRecover(thread: Thread, throwable: Throwable)
