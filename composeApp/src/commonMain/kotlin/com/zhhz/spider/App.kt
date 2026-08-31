@@ -79,6 +79,16 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
         // 2. 加载业务模块
         modules(appModule)
     }) {
+        // --- 全局错误捕获：未捕获异常不再崩溃，改为自定义错误提示框 ---
+        LaunchedEffect(Unit) { com.zhhz.spider.util.GlobalErrorHandler.install() }
+        val globalError by com.zhhz.spider.util.GlobalErrorHandler.currentError.collectAsState()
+        globalError?.let { err ->
+            com.zhhz.spider.ui.widget.GlobalErrorDialog(
+                error = err,
+                onDismiss = { com.zhhz.spider.util.GlobalErrorHandler.dismiss() }
+            )
+        }
+
         // --- 内部的所有组件现在都可以使用注入了 ---
         val bookDao = koinInject<BookDao>()
         val httpFetcher = koinInject<HttpFetcher>()
