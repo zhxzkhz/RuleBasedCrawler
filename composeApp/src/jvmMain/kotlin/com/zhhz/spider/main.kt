@@ -19,23 +19,21 @@ import androidx.compose.ui.window.application
 fun main() = application {
     // 尽早安装全局错误捕获，覆盖启动阶段
     com.zhhz.spider.util.GlobalErrorHandler.install()
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = "RuleBasedCrawler",
-        state = WindowState(width = 920.dp, height = 760.dp, position = WindowPosition.Aligned(Alignment.Center)),
-        onKeyEvent = {
-            // 💡 桌面端全局返回键（Esc）分发
-            if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) {
-                DesktopBackDispatcher.dispatch()
-            } else false
-        }
+    CompositionLocalProvider(
+        LocalWindowExceptionHandlerFactory provides AppWindowExceptionHandlerFactory(
+            DefaultWindowExceptionHandlerFactory
+        )
     ) {
-        // 用自定义异常工厂替换 Compose Desktop 默认实现：
-        // 默认实现会弹系统错误框并退出进程；这里改为上报到应用内错误框。
-        CompositionLocalProvider(
-            LocalWindowExceptionHandlerFactory provides AppWindowExceptionHandlerFactory(
-                DefaultWindowExceptionHandlerFactory
-            )
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = "RuleBasedCrawler",
+            state = WindowState(width = 920.dp, height = 760.dp, position = WindowPosition.Aligned(Alignment.Center)),
+            onKeyEvent = {
+                // 💡 桌面端全局返回键（Esc）分发
+                if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) {
+                    DesktopBackDispatcher.dispatch()
+                } else false
+            }
         ) {
             // 安全剪贴板：Windows 下剪贴板被其它程序占用时不再崩溃退出
             WithSafeClipboard {
