@@ -27,7 +27,7 @@ object RuleParser {
 
     // 预编译高频正则，避免每次调用重复编译
     private val internalQueryRegex = Regex("""\{\{\s*(?:(root)\.?)?(css:|xpath:|json:|\$\.|key)(.*?)\s*\}\}""")
-    private val templateRegex = Regex("""\{\{\s*([A-Za-z_][\w.-]*|key)\s*\}\}""")
+    private val templateRegex = Regex("""\{\{\s*([A-Za-z_][\w.:-]*|key)\s*\}\}""")
 
     /** 预期返回字符串 */
     fun parseString(input: Any?, selector: Selector, ctx: VariableContext): String {
