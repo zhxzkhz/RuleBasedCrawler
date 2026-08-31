@@ -113,19 +113,49 @@ class BookRepositoryImpl(
         var skippedCount = 0
         var missingRuleCount = 0
 
+        // 备份 mask → 本机 mask 映射表（用于转换书中的 groupFlags）
+        val maskRemap = mutableMapOf<Long, Long>()
+
         if (overrideMask == null) {
-            // 1. 合并模式：先合并分组定义；mask 或 名称 任一已存在则跳过，避免破坏本地位掩码布局
+            // 1. 合并模式：按名称匹配——本机已有同名分组则复用本机 mask，
+            // 避免备份与本机 mask 冲突时书籍归属错位。
             val localGroups = bookGroupDao.getAll()
+            val maskByName = localGroups.associate { it.name to it.mask }
             val usedMasks = localGroups.mapTo(mutableSetOf()) { it.mask }
-            val usedNames = localGroups.mapTo(mutableSetOf()) { it.name }
+
             backup.groups.forEach { group ->
-                if (group.mask !in usedMasks && group.name !in usedNames) {
+                val existingMask = maskByName[group.name]
+                if (existingMask != null) {
+                    // 本机已有同名分组，复用本机 mask，后续转换 books 的 groupFlags
+                    if (existingMask != group.mask) {
+                        maskRemap[group.mask] = existingMask
+                    }
+                } else if (group.mask !in usedMasks) {
+                    // 本机没有同名分组，使用备份的 mask
                     if (bookGroupDao.insert(group.copy(id = 0)) > 0) {
                         usedMasks.add(group.mask)
-                        usedNames.add(group.name)
+                    }
+                } else {
+                    // mask 被本机占用但名字不同，分配一个新的可用 mask
+                    val newMask = BookGroupFlags.nextMask(usedMasks)
+                    if (newMask != null && bookGroupDao.insert(group.copy(id = 0, mask = newMask)) > 0) {
+                        usedMasks.add(newMask)
                     }
                 }
             }
+        }
+
+        // 转换器：将备份 mask 转换为本机 mask
+        fun convertFlags(backupFlags: Long): Long {
+            var localFlags = 0L
+            var remaining = backupFlags
+            while (remaining != 0L) {
+                val bit = remaining.takeLowestOneBit() // 获取最低位的 mask
+                remaining = remaining and (remaining - 1) // 清除最低位
+                val converted = maskRemap[bit] ?: bit
+                localFlags = localFlags or converted
+            }
+            return localFlags
         }
 
         backup.books.forEach { item ->
@@ -134,10 +164,9 @@ class BookRepositoryImpl(
                 existing != null -> skippedCount++
                 item.book.ruleId !in knownRuleIds -> missingRuleCount++
                 else -> {
-                    // MOVE_TO_EXISTING 时用目标分组掩码覆盖备份里的归属
                     val imported = item.book.copy(
                         inLibrary = true,
-                        groupFlags = overrideMask ?: item.book.groupFlags
+                        groupFlags = overrideMask ?: convertFlags(item.book.groupFlags)
                     )
                     bookDao.addToBookshelf(imported)
                     if (item.chapters.isNotEmpty()) {
