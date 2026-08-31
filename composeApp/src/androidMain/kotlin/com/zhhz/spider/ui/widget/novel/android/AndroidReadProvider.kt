@@ -13,6 +13,11 @@ import kotlinx.coroutines.withContext
 
 private const val LINE_CHAR = "\n"
 
+private const val SRC_REPLACE_CHAR = "▩"
+
+// 匹配 img 标签，提取 src 参数
+private val imgPattern = Regex("""<img[^>]*src=['"]([^'"]*(?:['"][^>]+\})?)['"][^>]*>""", RegexOption.IGNORE_CASE)
+
 object AndroidReadProvider {
 
     val textPaint: TextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -33,7 +38,12 @@ object AndroidReadProvider {
 
             val lines = mutableListOf<TextLine>()
 
-            var textStr = text.replace("\r\n", LINE_CHAR).replace("\r", LINE_CHAR)
+            // 插图替换：提取 <img> 标签，记录地址，替换为占位符
+            val imageList = mutableListOf<String>()
+            val textStr = text.replace(imgPattern) { matchResult ->
+                imageList.add(matchResult.value)
+                SRC_REPLACE_CHAR
+            }.replace("\r\n", LINE_CHAR).replace("\r", LINE_CHAR)
 
             val contents = arrayListOf<String>()
             if (config.firstLineIndentation) {
@@ -50,13 +60,19 @@ object AndroidReadProvider {
             }
 
             for (str in contents) {
-                if (str == LINE_CHAR) {
+                if (str == LINE_CHAR){
                     if (config.preserveEmptyLine) {
                         val textLine = TextLine(LINE_CHAR)
                         textLine.addElement(NovelElement.TextRun(LINE_CHAR))
                         textLine.height = textPaint.textHeight
                         lines.add(textLine)
                     }
+                } else if (str == SRC_REPLACE_CHAR && imageList.isNotEmpty()) {
+                    // 整行都是插图
+                    val line = TextLine(SRC_REPLACE_CHAR)
+                    line.addElement(NovelElement.Illustration(imageList.removeAt(0)))
+                    line.height = textPaint.textHeight * 4
+                    lines.add(line)
                 } else {
                     textParse(str, maxWidth, lines, config)
                 }
