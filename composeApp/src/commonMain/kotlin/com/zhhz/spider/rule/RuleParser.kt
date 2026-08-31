@@ -359,6 +359,13 @@ object RuleParser {
             val key = match.groupValues[1]
             when {
                 key == "key" -> input
+                key == "encode:key" -> java.net.URLEncoder.encode(input, "UTF-8")
+                key.startsWith("encode:") -> {
+                    // encode:bookName 中的 bookName 从 ctx 取
+                    val varName = key.removePrefix("encode:")
+                    val value = ctx[varName] ?: match.value
+                    java.net.URLEncoder.encode(value, "UTF-8")
+                }
                 key.startsWith("ctx.") -> ctx[key.removePrefix("ctx.")] ?: match.value
                 else -> ctx[key] ?: match.value
             }
