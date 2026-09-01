@@ -231,13 +231,13 @@ actual fun AndroidNovelReader(
                                     }
                                 }
                                 is NovelElement.Illustration -> {
-                                    val illustTop = curY - marginPx
-                                    val illustHeight = textPaint.textHeight * 3 + marginPx
-                                    val illustWidth = size.width - marginPx * 2
+                                    // 插图行：以排版行高为准，上下各留半行高对称间隙
+                                    val lineH = textLine.height
+                                    val pad = textPaint.textHeight * 0.5f
                                     drawIllustration(
                                         url = element.url,
-                                        topLeft = Offset(marginPx, illustTop),
-                                        size = Size(illustWidth, illustHeight),
+                                        topLeft = Offset(marginPx, curY - lineH + pad),
+                                        size = Size(size.width - marginPx * 2, (lineH - pad * 2).coerceAtLeast(textPaint.textHeight)),
                                         bitmap = illustrationBitmaps[element.url]
                                     )
                                 }

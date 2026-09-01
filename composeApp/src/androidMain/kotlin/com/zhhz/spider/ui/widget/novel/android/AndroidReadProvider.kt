@@ -250,7 +250,7 @@ object AndroidReadProvider {
             var totalBaseSpacingHeight = 0f
             for (lineIndex in 0 until lines.size - 1) {
                 if (lines[lineIndex].isParagraphEnd) {
-                    totalBaseSpacingHeight += config.paragraphSpacing * density.density
+                    totalBaseSpacingHeight += baseExtraHeight + config.paragraphSpacing * density.density
                 } else {
                     totalBaseSpacingHeight += baseExtraHeight
                 }
@@ -262,7 +262,8 @@ object AndroidReadProvider {
             if (stretchableWhitespace <= 0) {
                 for (lineIndex in 0 until lines.size - 1) {
                     val line = lines[lineIndex]
-                    line.extraHeight = if (line.isParagraphEnd) config.paragraphSpacing * density.density else baseExtraHeight
+                    // 段落末行 = 行距 + 段距（叠加），否则设置行距时会"挤掉"段间距
+                    line.extraHeight = if (line.isParagraphEnd) baseExtraHeight + config.paragraphSpacing * density.density else baseExtraHeight
                 }
                 if (lines.isNotEmpty()) lines.last().extraHeight = 0f
                 continue
@@ -274,7 +275,7 @@ object AndroidReadProvider {
             for (lineIndex in 0 until lines.size - 1) {
                 val line = lines[lineIndex]
                 if (line.isParagraphEnd) {
-                    line.extraHeight = config.paragraphSpacing * density.density + justificationIncrement
+                    line.extraHeight = baseExtraHeight + config.paragraphSpacing * density.density + justificationIncrement
                 } else {
                     line.extraHeight = baseExtraHeight + justificationIncrement
                 }

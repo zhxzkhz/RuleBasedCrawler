@@ -257,7 +257,7 @@ class KmpReadProvider(
             var totalBaseSpacingHeight = 0f
             for (lineIndex in 0 until lines.size - 1) {
                 if (lines[lineIndex].isParagraphEnd) {
-                    totalBaseSpacingHeight += paragraphSpacingPx
+                    totalBaseSpacingHeight += baseExtraHeight + paragraphSpacingPx
                 } else {
                     totalBaseSpacingHeight += baseExtraHeight
                 }
@@ -269,7 +269,8 @@ class KmpReadProvider(
             if (stretchableWhitespace <= 0) {
                 for (lineIndex in 0 until lines.size - 1) {
                     val line = lines[lineIndex]
-                    line.extraHeight = if (line.isParagraphEnd) paragraphSpacingPx else baseExtraHeight
+                    // 段落末行 = 行距 + 段距（叠加），否则设置行距时会"挤掉"段间距
+                    line.extraHeight = if (line.isParagraphEnd) baseExtraHeight + paragraphSpacingPx else baseExtraHeight
                 }
                 if (lines.isNotEmpty()) lines.last().extraHeight = 0f
                 continue
@@ -281,7 +282,7 @@ class KmpReadProvider(
             for (lineIndex in 0 until lines.size - 1) {
                 val line = lines[lineIndex]
                 if (line.isParagraphEnd) {
-                    line.extraHeight = paragraphSpacingPx + justificationIncrement
+                    line.extraHeight = baseExtraHeight + paragraphSpacingPx + justificationIncrement
                 } else {
                     line.extraHeight = baseExtraHeight + justificationIncrement
                 }
