@@ -130,15 +130,17 @@ class KmpReadProvider(
                 textLine.addElement(element)
             }
 
+            // 段落最后一行必须标记，段间距才生效（与是否两端对齐无关）
+            if (lineIndex == layout.getLineCount() - 1) {
+                textLine.isParagraphEnd = true
+            }
+
             if (config.isJustify) {
                 when {
                     lineIndex == 0 && layout.getLineCount() > 1 -> {
                         justifyTextLine(textLine.elements, maxWidth.toFloat(), true)
                     }
-                    lineIndex == layout.getLineCount() - 1 -> {
-                        textLine.isParagraphEnd = true
-                    }
-                    else -> {
+                    lineIndex != layout.getLineCount() - 1 -> {
                         justifyTextLine(textLine.elements, maxWidth.toFloat(), false)
                     }
                 }

@@ -2,7 +2,9 @@ package com.zhhz.spider.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +30,13 @@ fun ContentRuleForm(contentRule: ContentPage?, highlightedSelectorName: String? 
                 onUpdate(contentRule.copy(urlSelector = it))
             }
             SelectorEditor("正文内容", contentRule.contentSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "ContentPage.contentSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(contentRule.copy(contentSelector = it)) }
+            Row {
+                Checkbox(
+                    checked = contentRule.preserveInlineImages,
+                    onCheckedChange = { onUpdate(contentRule.copy(preserveInlineImages = it)) }
+                )
+                Text("正文保留图片", fontSize = 13.sp)
+            }
             SelectorEditor("下一页", contentRule.nextUrlSelector, highlighted = isSelectorHighlighted(highlightedSelectorName, "ContentPage.nextUrlSelector"), onOpenJsEditor = onOpenJsEditor) { onUpdate(contentRule.copy(nextUrlSelector = it)) }
 
             SelectorEditor("图片头部（ImageHeader）", contentRule.imageHeaders,0,listOf(StepType.CONSTANT, StepType.SCRIPT), highlighted = isSelectorHighlighted(highlightedSelectorName, "ContentPage.imageHeaders"), onOpenJsEditor = onOpenJsEditor) {

@@ -18,10 +18,12 @@ import com.zhhz.spider.viewModel.MangaImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.Path
+import org.jsoup.Jsoup
 import org.koin.core.qualifier.named
 import org.koin.java.KoinJavaComponent.get
 
@@ -72,8 +74,14 @@ class ReaderRepositoryImpl(
                     val cachedMangaImages = Json.decodeFromString<List<MangaImage>>(cachedData)
                     ChapterBlock(chapterUrl = chapterUrl, chapterTitle = title, images = cachedMangaImages, isImageDecrypt = rule.content.decryptImage.isNotBlank())
                 } else {
-                    // 💡 小说离线：直接从物理文件读出纯文本展示！
-                    ChapterBlock(chapterUrl = chapterUrl, chapterTitle = title, text = cachedData)
+                    // 新缓存会保留插图请求信息；旧版纯文本缓存仍可直接读取。
+                    val cachedChapter = decodeCachedNovelChapter(cachedData)
+                    ChapterBlock(
+                        chapterUrl = chapterUrl,
+                        chapterTitle = title,
+                        text = cachedChapter?.text ?: cachedData,
+                        inlineImages = cachedChapter?.inlineImages.orEmpty()
+                    )
                 }
             }
 
@@ -116,19 +124,36 @@ class ReaderRepositoryImpl(
                     images = imageUrls
                 )
             } else {
-                //拼接List所有值
-                val textContent = rule.content.getContent(data, ctx).joinToString("\n") {
-                    it.toString()
-                }.trimEnd()
+                ctx["chapterUrl"] = chapterUrl
+                val rawContent = rule.content.getContent(data, ctx)
+                val imageHeaders = if (
+                    rawContent.any { containsNovelImageTag(it.toString()) || isStandaloneNovelImageUrl(it.toString()) } &&
+                    rule.content.imageHeaders.steps.isNotEmpty()
+                ) {
+                    decodeImageHeaders(
+                        rawHeaders = RuleParser.parseString(data, rule.content.imageHeaders, ctx),
+                        sourceName = rule.name.ifBlank { rule.id },
+                        chapterUrl = chapterUrl
+                    )
+                } else {
+                    mutableMapOf()
+                }
+                val novelContent = extractNovelContent(rawContent, chapterUrl, imageHeaders, rule.id)
 
-                if (isBookInLibrary && textContent.isNotBlank()) {
-                    atomicWrite(cacheFile, textContent)
+                if (isBookInLibrary && novelContent.text.isNotBlank()) {
+                    val cacheData = if (novelContent.inlineImages.isEmpty()) {
+                        novelContent.text
+                    } else {
+                        Json.encodeToString(CachedNovelChapter(novelContent.text, novelContent.inlineImages))
+                    }
+                    atomicWrite(cacheFile, cacheData)
                 }
 
                 ChapterBlock(
                     chapterUrl = chapterUrl,
                     chapterTitle = "",
-                    text = textContent
+                    text = novelContent.text,
+                    inlineImages = novelContent.inlineImages
                 )
             }
         }
@@ -183,6 +208,89 @@ class ReaderRepositoryImpl(
         }
     }
 }
+
+@Serializable
+private data class CachedNovelChapter(
+    val text: String,
+    val inlineImages: List<MangaImage>
+)
+
+internal data class ExtractedNovelContent(
+    val text: String,
+    val inlineImages: List<MangaImage>
+)
+
+private val novelImageTagRegex = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
+private val novelImageAttributeRegex = Regex(
+    """\b(data-src|data-original|data-lazy-src|data-echo|data-url|src)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))""",
+    RegexOption.IGNORE_CASE
+)
+private val standaloneNovelImageUrlRegex = Regex(
+    """\.(?:avif|bmp|gif|jpe?g|png|webp)(?:[?#].*)?$""",
+    RegexOption.IGNORE_CASE
+)
+
+internal fun containsNovelImageTag(content: String): Boolean = novelImageTagRegex.containsMatchIn(content)
+
+internal fun extractNovelContent(
+    rawContent: List<*>,
+    chapterUrl: String,
+    imageHeaders: Map<String, String>,
+    ruleId: String
+): ExtractedNovelContent {
+    val inlineImages = mutableListOf<MangaImage>()
+    fun imageMarker(imageUrl: String): String {
+        inlineImages += MangaImage(
+            url = imageUrl,
+            headers = imageHeaders.toMutableMap(),
+            ruleId = ruleId
+        )
+        return "▩$imageUrl▩"
+    }
+    val text = rawContent.joinToString("\n") { value ->
+        val content = value?.toString().orEmpty()
+        if (isStandaloneNovelImageUrl(content)) {
+            imageMarker(resolveNovelImageUrl(content, chapterUrl))
+        } else {
+            val contentWithMarkers = content.replace(novelImageTagRegex) { match ->
+                extractNovelImageUrl(match.value, chapterUrl)?.let(::imageMarker).orEmpty()
+            }
+            if (containsNovelImageTag(content)) {
+                Jsoup.parseBodyFragment(contentWithMarkers).text()
+            } else {
+                contentWithMarkers
+            }
+        }
+    }.trimEnd()
+    return ExtractedNovelContent(text, inlineImages)
+}
+
+private fun extractNovelImageUrl(imageTag: String, chapterUrl: String): String? {
+    val attributes = novelImageAttributeRegex.findAll(imageTag).mapNotNull { match ->
+        val name = match.groupValues[1].lowercase()
+        val value = match.groupValues.drop(2).firstOrNull { it.isNotBlank() }?.trim()
+        value?.takeIf { it.isNotBlank() }?.let { name to it }
+    }.toList()
+    val rawUrl = attributes.firstOrNull { it.first != "src" }?.second
+        ?: attributes.firstOrNull { it.first == "src" }?.second
+        ?: return null
+
+    return resolveNovelImageUrl(rawUrl, chapterUrl)
+}
+
+private fun isStandaloneNovelImageUrl(content: String): Boolean {
+    val candidate = content.trim()
+    return candidate.startsWith("data:image/", ignoreCase = true) ||
+        standaloneNovelImageUrlRegex.containsMatchIn(candidate)
+}
+
+private fun resolveNovelImageUrl(rawUrl: String, chapterUrl: String): String {
+    return runCatching { java.net.URI(chapterUrl).resolve(rawUrl).toString() }
+        .getOrDefault(rawUrl)
+}
+
+private fun decodeCachedNovelChapter(cachedData: String): CachedNovelChapter? =
+    runCatching { Json.decodeFromString<CachedNovelChapter>(cachedData) }.getOrNull()
 
 internal fun decodeImageHeaders(
     rawHeaders: String,

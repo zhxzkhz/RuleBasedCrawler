@@ -526,7 +526,8 @@ data class ChapterBlock(
     val index: Int = 0,
     val text: String = "",    // 小说文本
     val isImageDecrypt: Boolean = false,
-    val images: List<MangaImage> = emptyList() // 漫画图片列表
+    val images: List<MangaImage> = emptyList(), // 漫画图片列表
+    val inlineImages: List<MangaImage> = emptyList() // 小说正文中的插图，顺序由 text 内的占位符决定
 )
 
 data class ChapterContent(

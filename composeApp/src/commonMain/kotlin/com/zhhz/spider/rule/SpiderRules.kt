@@ -158,6 +158,7 @@ data class ContentPage(
     override val config: FetchConfig = FetchConfig(),
     override val urlSelector: Selector = Selector(),
     val contentSelector: Selector = Selector(),
+    val preserveInlineImages: Boolean = false,
     val nextUrlSelector: Selector = Selector(),
     //图片头部
     val imageHeaders: Selector = Selector(),
@@ -167,9 +168,33 @@ data class ContentPage(
     fun getReaderUrl(text: String, ctx: VariableContext ) = RuleParser.parseString(text, urlSelector, ctx)
 
     fun getContent(text: String, ctx: VariableContext): List<Any> {
-        return RuleParser.parseList(text, contentSelector, ctx)
+        val selector = if (preserveInlineImages) {
+            contentSelector.withLastTextQueryAsInnerHtml()
+        } else {
+            contentSelector
+        }
+        return RuleParser.parseList(text, selector, ctx)
     }
 
+}
+
+/**
+ * 正文图片需要随 HTML 一起进入阅读器。只转换选择器链中最后一个文本型 CSS/XPath 步骤，
+ * 中间步骤仍可继续使用 ELEMENT 来传递节点。
+ */
+private fun Selector.withLastTextQueryAsInnerHtml(): Selector {
+    val lastQueryIndex = steps.indexOfLast { it.type == StepType.CSS || it.type == StepType.XPATH }
+    val adjustedSteps = if (lastQueryIndex >= 0 && steps[lastQueryIndex].extractType == ExtractType.TEXT) {
+        steps.toMutableList().apply {
+            this[lastQueryIndex] = this[lastQueryIndex].copy(extractType = ExtractType.INNER_HTML)
+        }
+    } else {
+        steps
+    }
+    return copy(
+        steps = adjustedSteps,
+        fallback = fallback?.withLastTextQueryAsInnerHtml()
+    )
 }
 
 /**

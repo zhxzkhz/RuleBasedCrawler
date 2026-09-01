@@ -34,6 +34,38 @@ class RuleParserTest {
     }
 
     @Test
+    fun contentPagePreservesImageHtmlWhenEnabled() {
+        val page = ContentPage(
+            contentSelector = Selector(
+                steps = listOf(ParseStep(type = StepType.CSS, rule = ".content", extractType = ExtractType.TEXT))
+            ),
+            preserveInlineImages = true
+        )
+
+        val content = page.getContent(
+            "<article class='content'><p>正文<img data-src='/images/1.jpg'>继续</p></article>",
+            mutableMapOf()
+        ).single().toString()
+
+        assertTrue(content.contains("<img"))
+        assertTrue(content.contains("data-src=\"/images/1.jpg\""))
+    }
+
+    @Test
+    fun contentPageKeepsTextExtractionByDefault() {
+        val page = ContentPage(
+            contentSelector = Selector(
+                steps = listOf(ParseStep(type = StepType.CSS, rule = ".content", extractType = ExtractType.TEXT))
+            )
+        )
+
+        assertEquals(
+            "正文继续",
+            page.getContent("<article class='content'>正文<img src='/images/1.jpg'>继续</article>", mutableMapOf()).single()
+        )
+    }
+
+    @Test
     fun regexHonorsListFlag() {
         val selector = Selector(
             steps = listOf(ParseStep(type = StepType.REGEX, rule = """chapter-(\d+)""", isList = true))

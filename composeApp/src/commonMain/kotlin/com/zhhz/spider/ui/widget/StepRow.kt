@@ -126,13 +126,13 @@ fun StepRow(index: Int, step: ParseStep, onStepChange: (ParseStep) -> Unit, onDe
                     val nextEType = ExtractType.entries[(step.extractType.ordinal + 1) % ExtractType.entries.size]
                     onStepChange(step.copy(extractType = nextEType))
                 },
-                modifier = Modifier.height(28.dp),
+                modifier = Modifier.widthIn(min = 60.dp, max = 92.dp).height(28.dp),
                 contentPadding = PaddingValues(horizontal = 6.dp),
                 border = BorderStroke(1.dp, Color(0xFF1976D2).copy(0.3f)),
                 shape = RoundedCornerShape(4.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1976D2))
             ) {
-                Text(step.extractType.name, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(extractTypeLabel(step.extractType), fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
 
             // 4.2 只有当 ExtractType 为 ATTR 时，才显示属性名输入框
@@ -216,4 +216,13 @@ fun StepRow(index: Int, step: ParseStep, onStepChange: (ParseStep) -> Unit, onDe
         }
     }
 
+}
+
+private fun extractTypeLabel(type: ExtractType): String = when (type) {
+    ExtractType.ELEMENT -> "节点"
+    ExtractType.TEXT -> "文本"
+    ExtractType.OWN_TEXT -> "自身文本"
+    ExtractType.INNER_HTML -> "内部 HTML"
+    ExtractType.OUTER_HTML -> "完整 HTML"
+    ExtractType.ATTR -> "属性"
 }

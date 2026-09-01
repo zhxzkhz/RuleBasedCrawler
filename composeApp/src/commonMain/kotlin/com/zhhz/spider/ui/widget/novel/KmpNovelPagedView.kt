@@ -55,6 +55,10 @@ fun KmpNovelPagedView(
     val density = LocalDensity.current
 
     val currentBlock = uiState.content.blocks.firstOrNull() ?: return
+    if (currentBlock.inlineImages.isNotEmpty()) {
+        NovelInlineImagePagedReader(uiState, onProgressUpdate, onToggleMenu, onNext, onPrev)
+        return
+    }
     val text = currentBlock.text
     val chapterTitle = currentBlock.chapterTitle
 
@@ -85,16 +89,10 @@ fun KmpNovelPagedView(
             .background(Color(config.background))
             .focusRequester(focusRequester)
             .focusable()
-            // 菜单打开时不响应翻页手势（包括点击翻页、滑动手势等）
-            .pointerInput(uiState.isMenuVisible) {
-                if (uiState.isMenuVisible) return@pointerInput
-                detectTapGestures {
-                    if (textPages.isEmpty()) onToggleMenu()
-                }
-            }
     ) {
         val constraints = Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight)
         val screenWidth = constraints.maxWidth.toFloat()
+        val screenHeight = constraints.maxHeight.toFloat()
 
         LaunchedEffect(text, config, constraints) {
             if (constraints.maxWidth <= 0 || constraints.maxHeight <= 0) return@LaunchedEffect
@@ -126,7 +124,7 @@ fun KmpNovelPagedView(
 
             // 音量键翻页（Android）：上=上一页，下=下一页
             com.zhhz.spider.VolumeKeyPageEffect(
-                enabled = true,
+                enabled = !uiState.isMenuVisible,
                 onForward = { turnPage(false) },
                 onBackward = { turnPage(true) }
             )
@@ -143,9 +141,12 @@ fun KmpNovelPagedView(
 
             HorizontalPager(
                 state = pagerState,
+                userScrollEnabled = !uiState.isMenuVisible,
                 modifier = Modifier
                     .fillMaxSize()
+                    .blockReaderGestures(uiState.isMenuVisible, onToggleMenu)
                     .onPreviewKeyEvent { event ->
+                        if (uiState.isMenuVisible) return@onPreviewKeyEvent false
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (event.key) {
                             Key.DirectionRight -> { turnPage(true); true }
@@ -156,15 +157,16 @@ fun KmpNovelPagedView(
                             else -> false
                         }
                     }
-                    .pointerInput(Unit) {
+                    .pointerInput(textPages.size, screenWidth, screenHeight) {
                         detectTapGestures { offset ->
                             val target = when {
                                 offset.x < screenWidth / 3 -> pagerState.currentPage - 1
                                 offset.x > screenWidth * 2 / 3 -> pagerState.currentPage + 1
-                                else -> {
+                                offset.y <= screenHeight * 0.75f -> {
                                     onToggleMenu()
                                     return@detectTapGestures
                                 }
+                                else -> return@detectTapGestures
                             }
                             if (target in 0 until textPages.size) {
                                 scope.launch { pagerState.animateScrollToPage(target) }

@@ -16,13 +16,12 @@ private const val LINE_CHAR = "\n"
 private const val SRC_REPLACE_CHAR = "▩"
 
 // 匹配 img 标签，提取 src 参数
-private val imgPattern = Regex("""<img[^>]*src=['"]([^'"]*(?:['"][^>]+\})?)['"][^>]*>""", RegexOption.IGNORE_CASE)
+private val imgPattern = Regex("""<img[^>]*\bsrc=['"]([^'"]*)['"][^>]*>""", RegexOption.IGNORE_CASE)
+private val inlineImageMarkerPattern = Regex("""▩([^▩]+)▩""")
 
 object AndroidReadProvider {
 
-    val textPaint: TextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.textAlign = Paint.Align.LEFT
-    }
+    val textPaint: TextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.LEFT }
 
     suspend fun measureTextInBackground(
         text: String,
@@ -31,17 +30,24 @@ object AndroidReadProvider {
         density: Density
     ): List<TextPage> {
         return withContext(Dispatchers.Default) {
-            textPaint.textSize = config.textSize * density.density
-            textPaint.letterSpacing = config.letterSpacing
+            val layoutPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                textAlign = Paint.Align.LEFT
+                textSize = config.textSize * density.density
+                letterSpacing = config.letterSpacing
+            }
 
-            val maxWidth = (constraints.maxWidth - config.margin * 2 * density.density).toInt()
+            val marginPx = config.margin * density.density
+            val maxWidth = (constraints.maxWidth - marginPx * 2).toInt()
 
             val lines = mutableListOf<TextLine>()
 
-            // 插图替换：提取 <img> 标签，记录地址，替换为占位符
+            // 同时兼容旧缓存中的 <img> 和新正文缓存中的 ▩图片地址▩ 标记。
             val imageList = mutableListOf<String>()
             val textStr = text.replace(imgPattern) { matchResult ->
-                imageList.add(matchResult.value)
+                imageList.add(matchResult.groupValues[1].trim())
+                SRC_REPLACE_CHAR
+            }.replace(inlineImageMarkerPattern) { matchResult ->
+                imageList.add(matchResult.groupValues[1].trim())
                 SRC_REPLACE_CHAR
             }.replace("\r\n", LINE_CHAR).replace("\r", LINE_CHAR)
 
@@ -64,21 +70,21 @@ object AndroidReadProvider {
                     if (config.preserveEmptyLine) {
                         val textLine = TextLine(LINE_CHAR)
                         textLine.addElement(NovelElement.TextRun(LINE_CHAR))
-                        textLine.height = textPaint.textHeight
+                        textLine.height = layoutPaint.textHeight
                         lines.add(textLine)
                     }
                 } else if (str == SRC_REPLACE_CHAR && imageList.isNotEmpty()) {
                     // 整行都是插图
                     val line = TextLine(SRC_REPLACE_CHAR)
                     line.addElement(NovelElement.Illustration(imageList.removeAt(0)))
-                    line.height = textPaint.textHeight * 4
+                    line.height = layoutPaint.textHeight * 4
                     lines.add(line)
                 } else {
-                    textParse(str, maxWidth, lines, config)
+                    textParse(str, maxWidth, lines, config, marginPx, layoutPaint, imageList)
                 }
             }
 
-            generateAllTextPage(lines, constraints, config)
+            generateAllTextPage(lines, constraints, config, density, layoutPaint)
         }
     }
 
@@ -86,15 +92,18 @@ object AndroidReadProvider {
         text: String,
         maxWidth: Int,
         lines: MutableList<TextLine>,
-        config: ReadBookConfig
+        config: ReadBookConfig,
+        marginPx: Float,
+        paint: TextPaint,
+        imageList: MutableList<String>
     ) {
         val widthsArray = FloatArray(text.length)
-        textPaint.getTextWidths(text, widthsArray)
+        paint.getTextWidths(text, widthsArray)
 
         val (words, widths) = measureTextSplit(text, widthsArray)
-        val layout = AndroidZhLayout(text, textPaint, maxWidth, words, widths, 2)
+        val layout = AndroidZhLayout(text, paint, maxWidth, words, widths, 2)
 
-        val textHeight = textPaint.textHeight
+        val textHeight = paint.textHeight
 
         for (lineIndex in 0 until layout.lineCount) {
             val lineStart = layout.getLineStart(lineIndex)
@@ -106,17 +115,26 @@ object AndroidReadProvider {
             textLine.height = textHeight
             lines.add(textLine)
 
-            var curX = config.margin * 1f
+            var curX = marginPx
 
             for (index in lineWords.indices) {
                 val charWidth = lineWidths[index]
                 val tmpX = curX + charWidth
 
-                val element = NovelElement.TextRun(text = lineWords[index])
+                val element = if (lineWords[index] == SRC_REPLACE_CHAR && imageList.isNotEmpty()) {
+                    NovelElement.Illustration(imageList.removeAt(0))
+                } else {
+                    NovelElement.TextRun(text = lineWords[index])
+                }
                 element.rect.left = curX
                 element.rect.right = tmpX
                 curX = tmpX
                 textLine.addElement(element)
+            }
+
+            // 段落最后一行必须标记，段间距才生效（与是否两端对齐无关）
+            if (lineIndex == layout.lineCount - 1) {
+                textLine.isParagraphEnd = true
             }
 
             if (config.isJustify) {
@@ -124,10 +142,7 @@ object AndroidReadProvider {
                     lineIndex == 0 && layout.lineCount > 1 -> {
                         justifyTextLine(textLine.elements, maxWidth.toFloat(), true)
                     }
-                    lineIndex == layout.lineCount - 1 -> {
-                        textLine.isParagraphEnd = true
-                    }
-                    else -> {
+                    lineIndex != layout.lineCount - 1 -> {
                         justifyTextLine(textLine.elements, maxWidth.toFloat())
                     }
                 }
@@ -138,17 +153,19 @@ object AndroidReadProvider {
     private fun generateAllTextPage(
         textLines: MutableList<TextLine>,
         constraints: Constraints,
-        config: ReadBookConfig
+        config: ReadBookConfig,
+        density: Density,
+        paint: TextPaint
     ): List<TextPage> {
         val textPageList = mutableListOf<TextPage>()
 
-        val header = textPaint.textHeight * 0.65f
-        val footer = textPaint.textHeight * 0.65f
-        val marginPx = config.margin * 1f
+        val header = paint.textHeight * 0.65f
+        val footer = paint.textHeight * 0.65f
+        val marginPx = config.margin * density.density
         val maxHeight = constraints.maxHeight - marginPx * 2 - header - footer
 
-        val height = textLines.firstOrNull()?.height ?: textPaint.textHeight
-        val actualHeight = height * config.lineSpacingRatio + config.lineSpacing
+        val height = textLines.firstOrNull()?.height ?: paint.textHeight
+        val actualHeight = height * config.lineSpacingRatio + config.lineSpacing * density.density
         val extraHeight = actualHeight - height
 
         var fontIndex = 0
@@ -176,7 +193,7 @@ object AndroidReadProvider {
             textPage.addTextLine(textLine)
             curY += height
 
-            val spacingHeight = extraHeight + if (textLine.isParagraphEnd) config.paragraphSpacing.toFloat() else 0f
+            val spacingHeight = extraHeight + if (textLine.isParagraphEnd) config.paragraphSpacing * density.density else 0f
 
             if (curY + spacingHeight > maxHeight) {
                 if (config.ignoreLastEmptyLine) {
@@ -198,7 +215,14 @@ object AndroidReadProvider {
             textPageList.removeAt(i)
         }
 
-        verticallyJustifyPages(textPageList, maxHeight - textPaint.fontMetrics.descent, height, extraHeight, config)
+        verticallyJustifyPages(
+            textPageList,
+            maxHeight - paint.fontMetrics.descent,
+            height,
+            extraHeight,
+            config,
+            density
+        )
 
         for (page in textPageList) {
             if (page.textLines.isNotEmpty()) {
@@ -214,7 +238,8 @@ object AndroidReadProvider {
         maxHeight: Float,
         height: Float,
         baseExtraHeight: Float,
-        config: ReadBookConfig
+        config: ReadBookConfig,
+        density: Density
     ) {
         for (pageIndex in 0 until textPageList.size) {
             val page = textPageList[pageIndex]
@@ -225,7 +250,7 @@ object AndroidReadProvider {
             var totalBaseSpacingHeight = 0f
             for (lineIndex in 0 until lines.size - 1) {
                 if (lines[lineIndex].isParagraphEnd) {
-                    totalBaseSpacingHeight += config.paragraphSpacing
+                    totalBaseSpacingHeight += config.paragraphSpacing * density.density
                 } else {
                     totalBaseSpacingHeight += baseExtraHeight
                 }
@@ -237,7 +262,7 @@ object AndroidReadProvider {
             if (stretchableWhitespace <= 0) {
                 for (lineIndex in 0 until lines.size - 1) {
                     val line = lines[lineIndex]
-                    line.extraHeight = if (line.isParagraphEnd) config.paragraphSpacing.toFloat() else baseExtraHeight
+                    line.extraHeight = if (line.isParagraphEnd) config.paragraphSpacing * density.density else baseExtraHeight
                 }
                 if (lines.isNotEmpty()) lines.last().extraHeight = 0f
                 continue
@@ -249,7 +274,7 @@ object AndroidReadProvider {
             for (lineIndex in 0 until lines.size - 1) {
                 val line = lines[lineIndex]
                 if (line.isParagraphEnd) {
-                    line.extraHeight = config.paragraphSpacing + justificationIncrement
+                    line.extraHeight = config.paragraphSpacing * density.density + justificationIncrement
                 } else {
                     line.extraHeight = baseExtraHeight + justificationIncrement
                 }
