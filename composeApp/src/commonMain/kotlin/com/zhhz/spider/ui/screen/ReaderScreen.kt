@@ -200,6 +200,7 @@ fun ReaderScreen(
                         onChangeTheme = { bg, text -> viewModel.processIntent(ReaderUiIntent.ChangeTheme(bg, text)) },
                         onChangeMangaMode = { mode -> viewModel.processIntent(ReaderUiIntent.ChangeMangaMode(mode)) },
                         onLineSpacingChange = { viewModel.processIntent(ReaderUiIntent.ChangeLineSpacing(it)) },
+                        onParagraphSpacingChange = { viewModel.processIntent(ReaderUiIntent.ChangeParagraphSpacing(it)) },
                         onMarginChange = { viewModel.processIntent(ReaderUiIntent.ChangeMargin(it)) },
                         onFontFamilyChange = { viewModel.processIntent(ReaderUiIntent.ChangeFontFamily(it)) },
                         onBrightnessChange = { viewModel.processIntent(ReaderUiIntent.ChangeBrightness(it)) },
@@ -246,6 +247,7 @@ fun ReaderSettingsPanel(
     onChangeTheme: (Long, Long) -> Unit,
     onChangeMangaMode: (String) -> Unit,
     onLineSpacingChange: (Int) -> Unit = {},
+    onParagraphSpacingChange: (Int) -> Unit = {},
     onMarginChange: (Float) -> Unit = {},
     onFontFamilyChange: (String) -> Unit = {},
     onBrightnessChange: (Float) -> Unit = {},
@@ -379,6 +381,22 @@ fun ReaderSettingsPanel(
                         modifier = Modifier.weight(2f)
                     )
                     Text("${settings.lineSpacing}", modifier = Modifier.padding(start = 8.dp), fontSize = 14.sp, color = text)
+                }
+
+                // 段距
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("段距", style = MaterialTheme.typography.titleSmall, color = text.copy(alpha = 0.85f), modifier = Modifier.weight(1f))
+                    Slider(
+                        value = settings.paragraphSpacing.toFloat(),
+                        onValueChange = { onParagraphSpacingChange(it.toInt()) },
+                        valueRange = 0f..40f,
+                        steps = 39,
+                        modifier = Modifier.weight(2f)
+                    )
+                    Text("${settings.paragraphSpacing}", modifier = Modifier.padding(start = 8.dp), fontSize = 14.sp, color = text)
                 }
 
                 // 页边距

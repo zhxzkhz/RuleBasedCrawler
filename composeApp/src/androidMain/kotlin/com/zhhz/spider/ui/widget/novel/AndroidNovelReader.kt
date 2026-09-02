@@ -74,6 +74,7 @@ actual fun AndroidNovelReader(
         background = uiState.settings.backgroundColor.toInt(),
         textSize = uiState.settings.fontSize,
         lineSpacing = uiState.settings.lineSpacing,
+        paragraphSpacing = uiState.settings.paragraphSpacing,
         margin = uiState.settings.margin,
         fontFamily = uiState.settings.fontFamily,
         brightness = uiState.settings.brightness

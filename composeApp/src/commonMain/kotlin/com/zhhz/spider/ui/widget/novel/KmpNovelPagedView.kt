@@ -69,6 +69,7 @@ fun KmpNovelPagedView(
         background = uiState.settings.backgroundColor.toInt(),
         textSize = uiState.settings.fontSize,
         lineSpacing = uiState.settings.lineSpacing,
+        paragraphSpacing = uiState.settings.paragraphSpacing,
         margin = uiState.settings.margin,
         fontFamily = uiState.settings.fontFamily,
         brightness = uiState.settings.brightness
@@ -122,9 +123,12 @@ fun KmpNovelPagedView(
                 }
             }
 
-            // 音量键翻页（Android）：上=上一页，下=下一页
+            // 菜单或设置面板任一可见时都禁止翻页手势（两者互斥，设置打开时 menu=false）
+            val hudVisible = uiState.isMenuVisible || uiState.isSettingsVisible
+
+            // 音量键翻页（Android）：上=上一页，下=下一页；HUD 打开时禁用
             com.zhhz.spider.VolumeKeyPageEffect(
-                enabled = !uiState.isMenuVisible,
+                enabled = !hudVisible,
                 onForward = { turnPage(false) },
                 onBackward = { turnPage(true) }
             )
@@ -141,12 +145,12 @@ fun KmpNovelPagedView(
 
             HorizontalPager(
                 state = pagerState,
-                userScrollEnabled = !uiState.isMenuVisible,
+                userScrollEnabled = !hudVisible,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blockReaderGestures(uiState.isMenuVisible, onToggleMenu)
+                    .blockReaderGestures(hudVisible, onToggleMenu)
                     .onPreviewKeyEvent { event ->
-                        if (uiState.isMenuVisible) return@onPreviewKeyEvent false
+                        if (hudVisible) return@onPreviewKeyEvent false
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (event.key) {
                             Key.DirectionRight -> { turnPage(true); true }

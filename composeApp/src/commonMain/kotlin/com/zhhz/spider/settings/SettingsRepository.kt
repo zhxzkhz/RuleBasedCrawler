@@ -49,6 +49,7 @@ class SettingsRepository(
         val updateUngroupedBooks: Boolean = true,
         // ---------------- 阅读器扩展 ----------------
         val readerLineSpacing: Int = 10,
+        val readerParagraphSpacing: Int = 5,
         val readerMargin: Float = 40f,
         val readerFontFamily: String = "serif",
         val readerBrightness: Float = 1.0f,

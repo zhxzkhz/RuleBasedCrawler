@@ -44,6 +44,7 @@ class ReaderViewModel(
             textColor = saved.readerTextColor,
             mangaMode = saved.readerMangaMode,
             lineSpacing = saved.readerLineSpacing,
+            paragraphSpacing = saved.readerParagraphSpacing,
             margin = saved.readerMargin,
             fontFamily = saved.readerFontFamily,
             brightness = saved.readerBrightness,
@@ -140,6 +141,12 @@ class ReaderViewModel(
                 updateState {
                     persistSettings { it.copy(readerLineSpacing = intent.value) }
                     copy(settings = settings.copy(lineSpacing = intent.value))
+                }
+            }
+            is ReaderUiIntent.ChangeParagraphSpacing -> {
+                updateState {
+                    persistSettings { it.copy(readerParagraphSpacing = intent.value) }
+                    copy(settings = settings.copy(paragraphSpacing = intent.value))
                 }
             }
             is ReaderUiIntent.ChangeMargin -> {
@@ -543,6 +550,7 @@ data class ReaderSettings(
     // 漫画阅读模式："webtoon" 条滑 / "paged" 翻页 / "rtl" 日漫右开
     val mangaMode: String = "webtoon",
     val lineSpacing: Int = 10,
+    val paragraphSpacing: Int = 5,
     val margin: Float = 40f,
     val fontFamily: String = "serif",
     val brightness: Float = 1.0f,
@@ -611,6 +619,7 @@ sealed class ReaderUiIntent : UiIntent {
 
     data class UpdateReadProgress(val index: Int, val progress: Int = 0) : ReaderUiIntent()
     data class ChangeLineSpacing(val value: Int) : ReaderUiIntent()
+    data class ChangeParagraphSpacing(val value: Int) : ReaderUiIntent()
     data class ChangeMargin(val value: Float) : ReaderUiIntent()
     data class ChangeFontFamily(val family: String) : ReaderUiIntent()
     data class ChangeBrightness(val value: Float) : ReaderUiIntent()
