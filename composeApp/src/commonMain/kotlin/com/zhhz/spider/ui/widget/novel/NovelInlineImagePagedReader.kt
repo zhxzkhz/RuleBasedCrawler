@@ -89,6 +89,7 @@ internal fun NovelInlineImagePagedReader(
         background = uiState.settings.backgroundColor.toInt(),
         textSize = uiState.settings.fontSize,
         lineSpacing = uiState.settings.lineSpacing,
+        paragraphSpacing = uiState.settings.paragraphSpacing,
         margin = uiState.settings.margin,
         fontFamily = uiState.settings.fontFamily,
         brightness = uiState.settings.brightness
@@ -238,15 +239,20 @@ private fun splitNovelInlineSections(text: String, images: List<MangaImage>): Li
     val sections = mutableListOf<NovelInlineSection>()
     var textStart = 0
     marker.findAll(text).forEach { match ->
-        text.substring(textStart, match.range.first).takeIf { it.isNotEmpty() }?.let {
-            sections += NovelInlineSection.Text(it)
-        }
+        // 图片边界的换行由 imageGap 统一控制，避免图片前保留空行、图片后却被忽略。
+        text.substring(textStart, match.range.first)
+            .trim('\r', '\n')
+            .takeIf { it.isNotEmpty() }
+            ?.let { sections += NovelInlineSection.Text(it) }
         images.firstOrNull { it.url == match.groupValues[1] }?.let {
             sections += NovelInlineSection.Image(it)
         }
         textStart = match.range.last + 1
     }
-    text.substring(textStart).takeIf { it.isNotEmpty() }?.let { sections += NovelInlineSection.Text(it) }
+    text.substring(textStart)
+        .trimStart('\r', '\n')
+        .takeIf { it.isNotEmpty() }
+        ?.let { sections += NovelInlineSection.Text(it) }
     return sections
 }
 
@@ -282,15 +288,24 @@ private suspend fun buildInlineReaderPages(
         usedHeight += height
     }
 
-    for (section in sections) {
+    for ((sectionIndex, section) in sections.withIndex()) {
         when (section) {
-            is NovelInlineSection.Text -> provider
-                .measureTextInBackground(section.value, constraints, config)
-                .flatMap { it.textLines }
-                .forEach { line ->
-                    val trailingSpace = if (line.isParagraphEnd) paragraphSpacing else baseLineSpacing
+            is NovelInlineSection.Text -> {
+                val nextIsImage = sections.getOrNull(sectionIndex + 1) is NovelInlineSection.Image
+                val lines = provider
+                    .measureTextInBackground(section.value, constraints, config)
+                    .flatMap { it.textLines }
+                lines.forEachIndexed { lineIndex, line ->
+                    // 图片前一行不再附加段距/行距，间隔完全由图片自身的 imageGap 控制。
+                    val isLastBeforeImage = nextIsImage && lineIndex == lines.lastIndex
+                    val trailingSpace = when {
+                        isLastBeforeImage -> 0f
+                        line.isParagraphEnd -> baseLineSpacing + paragraphSpacing
+                        else -> baseLineSpacing
+                    }
                     append(InlinePageEntry.Text(line, trailingSpace), line.height + trailingSpace)
                 }
+            }
             is NovelInlineSection.Image -> {
                 val totalHeight = imageHeight + imageGap * 2
                 append(InlinePageEntry.Image(section.image, imageHeight, imageGap), totalHeight)
