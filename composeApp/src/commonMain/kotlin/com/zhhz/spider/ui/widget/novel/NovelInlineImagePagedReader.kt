@@ -64,7 +64,7 @@ import kotlinx.coroutines.launch
 
 private sealed interface InlinePageEntry {
     data class Text(val line: TextLine, val trailingSpace: Float) : InlinePageEntry
-    data class Image(val image: MangaImage, val height: Float) : InlinePageEntry
+    data class Image(val image: MangaImage, val height: Float, val gap: Float) : InlinePageEntry
 }
 
 private data class InlineReaderPage(val entries: List<InlinePageEntry>)
@@ -266,6 +266,8 @@ private suspend fun buildInlineReaderPages(
     val baseLineSpacing = textHeight * (config.lineSpacingRatio - 1f) + config.lineSpacing * density.density
     val paragraphSpacing = config.paragraphSpacing * density.density
     val imageHeight = minOf(maxContentHeight * 0.32f, 260f * density.density).coerceAtLeast(textHeight * 2.5f)
+    // 图片上下留白与普通行距保持一致，避免图片与上下文字间距不对称
+    val imageGap = baseLineSpacing
     val pages = mutableListOf<InlineReaderPage>()
     val entries = mutableListOf<InlinePageEntry>()
     var usedHeight = 0f
@@ -289,10 +291,10 @@ private suspend fun buildInlineReaderPages(
                     val trailingSpace = if (line.isParagraphEnd) paragraphSpacing else baseLineSpacing
                     append(InlinePageEntry.Text(line, trailingSpace), line.height + trailingSpace)
                 }
-            is NovelInlineSection.Image -> append(
-                InlinePageEntry.Image(section.image, imageHeight),
-                imageHeight
-            )
+            is NovelInlineSection.Image -> {
+                val totalHeight = imageHeight + imageGap * 2
+                append(InlinePageEntry.Image(section.image, imageHeight, imageGap), totalHeight)
+            }
         }
     }
     if (entries.isNotEmpty()) pages += InlineReaderPage(entries.toList())
@@ -328,8 +330,9 @@ private fun InlineNovelPage(
                 when (entry) {
                     is InlinePageEntry.Text -> currentTop += entry.line.height + entry.trailingSpace
                     is InlinePageEntry.Image -> {
-                        add(InlineImageLayout(entry.image, currentTop, entry.height))
-                        currentTop += entry.height
+                        // 图片上方留 gap，与下方 gap 对称
+                        add(InlineImageLayout(entry.image, currentTop + entry.gap, entry.height))
+                        currentTop += entry.height + entry.gap * 2
                     }
                 }
             }
@@ -349,7 +352,7 @@ private fun InlineNovelPage(
                         }
                         curY += entry.line.height + entry.trailingSpace
                     }
-                    is InlinePageEntry.Image -> curY += entry.height
+                    is InlinePageEntry.Image -> curY += entry.height + entry.gap * 2
                 }
             }
         }
