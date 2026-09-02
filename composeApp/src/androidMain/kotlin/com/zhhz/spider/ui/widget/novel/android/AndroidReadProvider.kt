@@ -74,10 +74,10 @@ object AndroidReadProvider {
                         lines.add(textLine)
                     }
                 } else if (str == SRC_REPLACE_CHAR && imageList.isNotEmpty()) {
-                    // 整行都是插图
+                    // 整行都是插图：分配 10 倍字高的空间
                     val line = TextLine(SRC_REPLACE_CHAR)
                     line.addElement(NovelElement.Illustration(imageList.removeAt(0)))
-                    line.height = layoutPaint.textHeight * 4
+                    line.height = layoutPaint.textHeight * 10
                     lines.add(line)
                 } else {
                     textParse(str, maxWidth, lines, config, marginPx, layoutPaint, imageList)

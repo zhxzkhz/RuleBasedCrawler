@@ -32,6 +32,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.geometry.Size
+import com.zhhz.spider.ui.widget.novel.drawIllustration
+import com.zhhz.spider.ui.widget.novel.rememberIllustrations
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.sp
@@ -183,6 +186,12 @@ fun KmpNovelPagedView(
                     }
             ) { pageIndex ->
                 val page = textPages[pageIndex]
+                val illustrationUrls = remember(pageIndex, textPages) {
+                    page.textLines.flatMap { line ->
+                        line.elements.filterIsInstance<NovelElement.Illustration>().map { it.url }
+                    }.distinct()
+                }
+                val illustrationBitmaps = rememberIllustrations(illustrationUrls)
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val marginPx = config.margin * density.density
                     val header = textMeasurer.measure("我", textStyle).size.height * 0.85f
@@ -217,13 +226,28 @@ fun KmpNovelPagedView(
 
                     for (textLine in page.textLines) {
                         for (element in textLine.elements) {
-                            if (element is NovelElement.TextRun) {
-                                if (element.text.isNotBlank() && element.text != "\n") {
-                                    drawText(
-                                        textMeasurer = textMeasurer,
-                                        text = element.text,
-                                        topLeft = Offset(element.rect.left, curY),
-                                        style = textStyle
+                            when (element) {
+                                is NovelElement.TextRun -> {
+                                    if (element.text.isNotBlank() && element.text != "\n") {
+                                        drawText(
+                                            textMeasurer = textMeasurer,
+                                            text = element.text,
+                                            topLeft = Offset(element.rect.left, curY),
+                                            style = textStyle
+                                        )
+                                    }
+                                }
+                                is NovelElement.Illustration -> {
+                                    // 插图行：在分配的排版空间内居中，上下各留 1 倍字高
+                                    val lineH = textLine.height
+                                    val pad = (config.textSize * density.density)
+                                    val top = curY - lineH + pad
+                                    val h = (lineH - pad * 2).coerceAtLeast(pad)
+                                    drawIllustration(
+                                        url = element.url,
+                                        topLeft = Offset(marginPx, top),
+                                        size = Size(size.width - marginPx * 2, h),
+                                        bitmap = illustrationBitmaps[element.url]
                                     )
                                 }
                             }

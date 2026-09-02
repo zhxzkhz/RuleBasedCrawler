@@ -232,13 +232,16 @@ actual fun AndroidNovelReader(
                                     }
                                 }
                                 is NovelElement.Illustration -> {
-                                    // 插图行：以排版行高为准，上下各留半行高对称间隙
+                                    // 插图行：在分配的排版空间 (lineH) 中绝对居中绘制，
+                                    // 并在此空间上下各留出 1 倍字高的强制留白。
                                     val lineH = textLine.height
-                                    val pad = textPaint.textHeight * 0.5f
+                                    val pad = textPaint.textHeight * 1f
+                                    val illustHeight = (lineH - pad * 2).coerceAtLeast(textPaint.textHeight)
+                                    val illustTop = curY - lineH + pad
                                     drawIllustration(
                                         url = element.url,
-                                        topLeft = Offset(marginPx, curY - lineH + pad),
-                                        size = Size(size.width - marginPx * 2, (lineH - pad * 2).coerceAtLeast(textPaint.textHeight)),
+                                        topLeft = Offset(marginPx, illustTop),
+                                        size = Size(size.width - marginPx * 2, illustHeight),
                                         bitmap = illustrationBitmaps[element.url]
                                     )
                                 }
