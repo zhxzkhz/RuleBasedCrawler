@@ -134,10 +134,15 @@ fun DownloadSettingsContent(
     val bounds = com.zhhz.spider.settings.SettingsRepository.DOWNLOAD_BOOKS_RANGE
     val imageBounds = com.zhhz.spider.settings.SettingsRepository.DOWNLOAD_IMAGES_RANGE
 
-    val initial = remember { viewModel.loadDownloadSettings() }
-    var books by remember { mutableStateOf(initial.downloadBooks) }
-    var images by remember { mutableStateOf(initial.downloadImages) }
+    var books by remember { mutableIntStateOf(2) }
+    var images by remember { mutableIntStateOf(6) }
     val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        val initial = viewModel.loadDownloadSettings()
+        books = initial.downloadBooks
+        images = initial.downloadImages
+    }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Text("设置", fontWeight = FontWeight.Bold, fontSize = 18.sp)

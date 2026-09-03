@@ -33,15 +33,10 @@ val commonModule = module {
 
     // 注入 Dao
     single { get<AppDatabase>().ruleDao() }
-
-    // 注入 Dao
     single { get<AppDatabase>().bookDao() }
-
-    // 注入 Dao
     single { get<AppDatabase>().chapterDao() }
-
-    // 注入 Dao
     single { get<AppDatabase>().bookGroupDao() }
+    single { get<AppDatabase>().settingsDao() }
 
     // 创建拦截器单例
     single {
@@ -100,7 +95,7 @@ val commonModule = module {
         bind<CommentRepository>()
     }
 
-    single { SettingsRepository(get<File>(named("cacheDir"))) }
+    single { SettingsRepository(get(), get<File>(named("cacheDir"))) }
 
 
     // ================= 视图模型层 (ViewModel) =================

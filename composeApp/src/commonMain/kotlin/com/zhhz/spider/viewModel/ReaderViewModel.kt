@@ -32,25 +32,10 @@ class ReaderViewModel(
     private val readerRepository: ReaderRepository,
     private val catalogRepository: CatalogRepository,
     private val sessionRepository: SessionRepository,
-    private val ruleRepository: RuleRepository, // 💡 新增：用于动态判断是不是漫画
+    private val ruleRepository: RuleRepository,
     private val settingsRepository: com.zhhz.spider.settings.SettingsRepository
 ) : BaseViewModel<ReaderUiState, ReaderUiIntent, ReaderUiEffect>(
-    initialState = ReaderUiState(settings = run {
-        // 启动时恢复上次阅读设置（字号/主题/漫画模式）
-        val saved = settingsRepository.loadBlocking()
-        ReaderSettings(
-            fontSize = saved.readerFontSize,
-            backgroundColor = saved.readerBackground,
-            textColor = saved.readerTextColor,
-            mangaMode = saved.readerMangaMode,
-            lineSpacing = saved.readerLineSpacing,
-            paragraphSpacing = saved.readerParagraphSpacing,
-            margin = saved.readerMargin,
-            fontFamily = saved.readerFontFamily,
-            brightness = saved.readerBrightness,
-            useAndroidReader = saved.readerUseAndroidReader
-        )
-    })
+    initialState = ReaderUiState()
 ) {
     companion object {
         private const val PRELOAD_COUNT = 5
@@ -59,7 +44,30 @@ class ReaderViewModel(
     }
 
     /** 最近一次持久化的应用设置（含阅读器），变更时整体写回 */
-    private var persistedSettings = settingsRepository.loadBlocking()
+    private var persistedSettings = com.zhhz.spider.settings.SettingsRepository.AppSettings()
+
+    init {
+        // 启动时异步加载阅读设置
+        viewModelScope.launch {
+            val saved = settingsRepository.load()
+            persistedSettings = saved
+            updateState {
+                copy(settings = ReaderSettings(
+                    fontSize = saved.readerFontSize,
+                    backgroundColor = saved.readerBackground,
+                    textColor = saved.readerTextColor,
+                    mangaMode = saved.readerMangaMode,
+                    lineSpacing = saved.readerLineSpacing,
+                    paragraphSpacing = saved.readerParagraphSpacing,
+                    margin = saved.readerMargin,
+                    fontFamily = saved.readerFontFamily,
+                    brightness = saved.readerBrightness,
+                    useAndroidReader = saved.readerUseAndroidReader,
+                    pageAnimation = saved.readerPageAnimation
+                ))
+            }
+        }
+    }
 
     /** 更新内存缓存并异步落盘，避免阻塞 UI 线程 */
     private fun persistSettings(transform: (com.zhhz.spider.settings.SettingsRepository.AppSettings) -> com.zhhz.spider.settings.SettingsRepository.AppSettings) {
@@ -547,14 +555,14 @@ data class ReaderSettings(
     val fontSize: Int = 18,
     val backgroundColor: Long = 0xFFFAF7F0,
     val textColor: Long = 0xFF333333,
-    // 漫画阅读模式："webtoon" 条滑 / "paged" 翻页 / "rtl" 日漫右开
     val mangaMode: String = "webtoon",
     val lineSpacing: Int = 10,
     val paragraphSpacing: Int = 5,
     val margin: Float = 40f,
     val fontFamily: String = "serif",
     val brightness: Float = 1.0f,
-    val useAndroidReader: Boolean = false
+    val useAndroidReader: Boolean = false,
+    val pageAnimation: Boolean = true
 )
 
 data class ReaderUiState(

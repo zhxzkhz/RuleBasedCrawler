@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,15 +89,16 @@ fun RuleManagementScreen(
     var pendingDelete by remember { mutableStateOf<RuleEntity?>(null) }
 
     // 💡 规则订阅源
-    var subscriptions by remember {
-        mutableStateOf(settingsRepo.loadBlocking().ruleSubscriptions)
+    var subscriptions by remember { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(Unit) {
+        runCatching { subscriptions = settingsRepo.load().ruleSubscriptions }
     }
     var showSubscriptionDialog by remember { mutableStateOf(false) }
     var syncingUrl by remember { mutableStateOf<String?>(null) }
 
     fun persistSubscriptions(list: List<String>) {
         subscriptions = list
-        scope.launch { runCatching { settingsRepo.save(settingsRepo.loadBlocking().copy(ruleSubscriptions = list)) } }
+        scope.launch { runCatching { settingsRepo.save(settingsRepo.load().copy(ruleSubscriptions = list)) } }
     }
 
     fun syncSubscription(url: String) {

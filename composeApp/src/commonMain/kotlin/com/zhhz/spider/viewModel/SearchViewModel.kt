@@ -36,8 +36,13 @@ class SearchViewModel(
     private var loadMoreJob: Job? = null
 
     init {
-        // 恢复搜索历史
-        updateState { copy(searchHistory = settingsRepository.loadBlocking().searchHistory) }
+        viewModelScope.launch {
+            // 恢复搜索历史
+            runCatching {
+                val history = settingsRepository.load().searchHistory
+                updateState { copy(searchHistory = history) }
+            }
+        }
         viewModelScope.launch {
             ruleRepository.loadData().collect { rules ->
                 val availableRules = rules
@@ -144,14 +149,14 @@ class SearchViewModel(
         val updated = (listOf(trimmed) + uiState.value.searchHistory.filter { it != trimmed }).take(10)
         updateState { copy(searchHistory = updated) }
         viewModelScope.launch {
-            runCatching { settingsRepository.save(settingsRepository.loadBlocking().copy(searchHistory = updated)) }
+            runCatching { settingsRepository.save(settingsRepository.load().copy(searchHistory = updated)) }
         }
     }
 
     private fun handleClearSearchHistory() {
         updateState { copy(searchHistory = emptyList()) }
         viewModelScope.launch {
-            runCatching { settingsRepository.save(settingsRepository.loadBlocking().copy(searchHistory = emptyList())) }
+            runCatching { settingsRepository.save(settingsRepository.load().copy(searchHistory = emptyList())) }
         }
     }
 

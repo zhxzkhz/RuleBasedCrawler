@@ -29,17 +29,12 @@ class DownloadManager(
     private val catalogRepository: CatalogRepository,
     private val readerRepository: ReaderRepository,
     private val contextSessionManager: ContextSessionManager,
-    private val platformContext: PlatformContext,   // 💡 注入跨平台的 Context
-    settingsRepository: com.zhhz.spider.settings.SettingsRepository
+    private val platformContext: PlatformContext,
+    private val settingsRepository: com.zhhz.spider.settings.SettingsRepository
 ) {
-
-    private val initialSettings = settingsRepository.loadBlocking()
 
     /**
      * 可动态调整上限的并发控制器。
-     * - 新任务使用当前 limit 排队
-     * - limit 降低时，已持有的许可不受影响（自然耗尽），新任务按新上限等待
-     * - 替换信号量不会泄漏已分配的许可
      */
     private class ResizeableSemaphore(initialLimit: Int) {
         @Volatile private var semaphore = Semaphore(initialLimit)
@@ -49,7 +44,6 @@ class DownloadManager(
         fun resize(newLimit: Int) {
             if (newLimit < 1) return
             limit = newLimit
-            // 始终用新实例接收新任务；旧实例的 withPermit 仍在其生命周期内正常释放
             semaphore = Semaphore(newLimit)
         }
 
@@ -66,18 +60,26 @@ class DownloadManager(
         }
     }
 
-    private val bookSlots = ResizeableSemaphore(initialSettings.downloadBooks)
-    private val imageSlots = ResizeableSemaphore(initialSettings.downloadImages)
+    private val bookSlots = ResizeableSemaphore(2)
+    private val imageSlots = ResizeableSemaphore(6)
+
+    private val imageLoader = SingletonImageLoader.get(platformContext)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // 异步加载设置并更新并发上限
+        scope.launch {
+            val settings = settingsRepository.load()
+            bookSlots.resize(settings.downloadBooks)
+            imageSlots.resize(settings.downloadImages)
+        }
+    }
 
     /** 设置界面调用：更新全局并发上限（对排队中的任务即时生效） */
     fun updateConcurrency(books: Int, images: Int) {
         bookSlots.resize(books)
         imageSlots.resize(images)
     }
-
-    private val imageLoader = SingletonImageLoader.get(platformContext)
-    // 💡 1. 独立于任何 ViewModel 的常驻协程作用域 (守护进程)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // 💡 2. 状态流：供 UI (如书架页或专门的下载管理页) 实时观察所有的下载进度
     private val _downloadTasks = MutableStateFlow<Map<String, DownloadTask>>(emptyMap())

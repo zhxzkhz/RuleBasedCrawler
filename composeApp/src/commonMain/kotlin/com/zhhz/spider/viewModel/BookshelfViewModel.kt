@@ -43,24 +43,25 @@ class BookshelfViewModel(
 
 
     init {
-        // 初始化时发送意图：观察书籍变化
         processIntent(BookshelfUiIntent.ObserveBooks)
-        // 恢复上次的排序与视图偏好等
-        runCatching {
-            val savedSettings = settingsRepository.loadBlocking()
-            val savedSort = savedSettings.shelfSort
-            val savedViewMode = savedSettings.shelfViewMode
-            updateState {
-                copy(
-                    sortMode = if (savedSort in setOf("recent", "created", "title")) savedSort else "recent",
-                    viewMode = if (savedViewMode == "list") "list" else "grid",
-                    updateUngroupedBooks = savedSettings.updateUngroupedBooks
-                )
+        processIntent(BookshelfUiIntent.ObserveGroups)
+
+        // 异步加载设置
+        viewModelScope.launch {
+            runCatching {
+                val savedSettings = settingsRepository.load()
+                updateState {
+                    copy(
+                        sortMode = if (savedSettings.shelfSort in setOf("recent", "created", "title")) savedSettings.shelfSort else "recent",
+                        viewMode = if (savedSettings.shelfViewMode == "list") "list" else "grid",
+                        updateUngroupedBooks = savedSettings.updateUngroupedBooks,
+                        startDefaultGroupMask = savedSettings.appStartDefaultGroupMask,
+                        selectedGroupMask = if (savedSettings.appStartDefaultGroupMask != 0L) savedSettings.appStartDefaultGroupMask else selectedGroupMask
+                    )
+                }
             }
         }
-        // 观察自定义分组定义变化
-        processIntent(BookshelfUiIntent.ObserveGroups)
-        // 💡 新增：观察下载任务流，并将其合并到 UiState 中供界面显示
+
         viewModelScope.launch {
             downloadManager.downloadTasks.collectLatest { tasks ->
                 updateState { copy(downloadTasks = tasks) }
@@ -137,7 +138,7 @@ class BookshelfViewModel(
                 // 排序偏好持久化，下次启动保持
                 viewModelScope.launch {
                     runCatching {
-                        settingsRepository.save(settingsRepository.loadBlocking().copy(shelfSort = intent.mode))
+                        settingsRepository.save(settingsRepository.load().copy(shelfSort = intent.mode))
                     }
                 }
             }
@@ -145,7 +146,7 @@ class BookshelfViewModel(
                 updateState { copy(viewMode = intent.mode) }
                 viewModelScope.launch {
                     runCatching {
-                        settingsRepository.save(settingsRepository.loadBlocking().copy(shelfViewMode = intent.mode))
+                        settingsRepository.save(settingsRepository.load().copy(shelfViewMode = intent.mode))
                     }
                 }
             }
@@ -155,7 +156,7 @@ class BookshelfViewModel(
                 updateState { copy(updateUngroupedBooks = intent.enabled) }
                 viewModelScope.launch {
                     runCatching {
-                        settingsRepository.save(settingsRepository.loadBlocking().copy(updateUngroupedBooks = intent.enabled))
+                        settingsRepository.save(settingsRepository.load().copy(updateUngroupedBooks = intent.enabled))
                     }
                 }
             }
@@ -216,7 +217,7 @@ class BookshelfViewModel(
             is BookshelfUiIntent.SetStartDefaultGroupMask -> {
                 viewModelScope.launch {
                     runCatching {
-                        settingsRepository.save(settingsRepository.loadBlocking().copy(appStartDefaultGroupMask = intent.mask))
+                        settingsRepository.save(settingsRepository.load().copy(appStartDefaultGroupMask = intent.mask))
                     }
                 }
             }
@@ -357,8 +358,8 @@ class BookshelfViewModel(
     }
 
     /** 读取当前下载并发设置（供设置界面初始化显示） */
-    fun loadDownloadSettings(): com.zhhz.spider.settings.SettingsRepository.AppSettings =
-        settingsRepository.loadBlocking()
+    suspend fun loadDownloadSettings(): com.zhhz.spider.settings.SettingsRepository.AppSettings =
+        settingsRepository.load()
 
     private fun handleRefreshBooks() {
         if (refreshJob?.isActive == true) return
@@ -416,7 +417,7 @@ class BookshelfViewModel(
                 // 记录本次追更检查时间（供节流自动刷新使用）
                 runCatching {
                     settingsRepository.save(
-                        settingsRepository.loadBlocking().copy(lastUpdateCheckAt = System.currentTimeMillis())
+                        settingsRepository.load().copy(lastUpdateCheckAt = System.currentTimeMillis())
                     )
                 }
             } catch (e: CancellationException) {

@@ -7,8 +7,8 @@ import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 
 @Database(
-    entities = [BookEntity::class, ChapterEntity::class, RuleEntity::class, SessionEntity::class, BookGroupEntity::class], // 必须在这里添加新类
-    version = 11,
+    entities = [BookEntity::class, ChapterEntity::class, RuleEntity::class, SessionEntity::class, BookGroupEntity::class, SettingsEntity::class],
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -16,6 +16,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun chapterDao(): ChapterDao
     abstract fun bookGroupDao(): BookGroupDao
+    abstract fun settingsDao(): SettingsDao
 }
 
 /**
@@ -111,5 +112,21 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
 val MIGRATION_10_11 = object : Migration(10, 11) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL("ALTER TABLE `book_groups` ADD COLUMN `isAutoUpdate` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+/**
+ * v11 -> v12：应用设置持久化到数据库
+ * 新建 app_settings key-value 表，替代 JSON 文件存储
+ */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("""
+            CREATE TABLE IF NOT EXISTS `app_settings` (
+                `key` TEXT NOT NULL,
+                `value` TEXT NOT NULL,
+                PRIMARY KEY(`key`)
+            )
+        """.trimIndent())
     }
 }
