@@ -45,7 +45,7 @@ class SettingsRepository(
         // ---------------- 追更检测 ----------------
         // 上次自动检查更新的时间戳（节流：间隔不足则不自动刷新）
         val lastUpdateCheckAt: Long = 0,
-        // 是否允许自动更新“未分组”的书籍（默认 true）
+        // 是否允许自动更新"未分组"的书籍（默认 true）
         val updateUngroupedBooks: Boolean = true,
         // ---------------- 阅读器扩展 ----------------
         val readerLineSpacing: Int = 10,
@@ -53,7 +53,11 @@ class SettingsRepository(
         val readerMargin: Float = 40f,
         val readerFontFamily: String = "serif",
         val readerBrightness: Float = 1.0f,
-        val readerUseAndroidReader: Boolean = false
+        val readerUseAndroidReader: Boolean = false,
+        // 翻页动画：true=滚动，false=瞬时切换
+        val readerPageAnimation: Boolean = true,
+        // 启动时默认进入的分组位掩码（0=全部）。在分组管理里设置。
+        val appStartDefaultGroupMask: Long = 0L
     )
 
     private val file = File(cacheDir, "app_settings.json")

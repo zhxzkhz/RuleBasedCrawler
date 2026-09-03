@@ -201,7 +201,25 @@ class BookshelfViewModel(
             is BookshelfUiIntent.SelectAll -> handleSelectAll()
             is BookshelfUiIntent.DeleteSelectedBooks -> {
                 handleDeleteSelectedBooks()
-            } //handleDeleteSelectedBooks()
+            }
+
+            // ---------------- 分组相关 ----------------
+            is BookshelfUiIntent.ChooseStartGroup -> {
+                updateState { copy(selectedGroupMask = intent.mask, showStartGroupDialog = false) }
+            }
+            is BookshelfUiIntent.DismissStartGroupDialog -> {
+                updateState { copy(showStartGroupDialog = false) }
+            }
+            is BookshelfUiIntent.OpenStartGroupDialog -> {
+                updateState { copy(showStartGroupDialog = true) }
+            }
+            is BookshelfUiIntent.SetStartDefaultGroupMask -> {
+                viewModelScope.launch {
+                    runCatching {
+                        settingsRepository.save(settingsRepository.loadBlocking().copy(appStartDefaultGroupMask = intent.mask))
+                    }
+                }
+            }
         }
     }
 
@@ -629,224 +647,7 @@ class BookshelfViewModel(
 
 }
 
-
-// ==========================================
-// 1. 书架状态 (UiState)
-// ==========================================
-data class BookshelfUiState(
-    // 核心数据：书架里的书籍列表
-    val books: List<Book> = emptyList(),
-
-    // 💡 融合刚才设计的全局下载管理器状态
-    // Key 为 bookUrl，Value 为对应的下载任务进度
-    val downloadTasks: Map<String, DownloadTask> = emptyMap(),
-
-    // 页面级状态
-    val isLoading: Boolean = true,           // 首次冷启动加载中
-    val isRefreshing: Boolean = false,       // 下拉刷新检测全本更新中
-    val refreshCompletedCount: Int = 0,
-    val refreshTotalCount: Int = 0,
-    val refreshBookTitle: String = "",
-    val isSelectionMode: Boolean = false,    // 是否处于多选管理模式 (如批量删除/下载)
-    val selectedBooks: Set<String> = emptySet(), // 当前选中的书本 URLs (用于批量操作)
-
-    // 💡 自定义分组：定义列表 + 当前筛选的位掩码（0=全部）
-    val groups: List<BookGroupEntity> = emptyList(),
-    val selectedGroupMask: Long = 0L,
-
-    // 💡 书架排序与视图模式
-    val sortMode: String = "recent",
-    val onlyUpdated: Boolean = false,
-    val viewMode: String = "grid",
-    val readFilter: String = "all", // all(全部) / unread(未读) / reading(在看)
-
-    // 💡 核心新增：专门用于控制导出进度条的 UI 状态
-    val isExporting: Boolean = false,     // 💡 是否正在导出（控制弹窗显示）
-    val exportProgress: Float = 0f,       // 💡 进度比例：从 0.0f 到 1.0f
-    val exportBookTitle: String = "",     // 💡 当前正在导出的书名
-    val exportChapterProgress: String = "", // 💡 文本显示进度，如 "50 / 120 章"
-
-    // 💡 是否正在导入书架备份（大文件防"卡死"感）
-    val isImporting: Boolean = false,
-
-    // 💡 全局设置：未分组的书籍是否参与自动更新
-    val updateUngroupedBooks: Boolean = true
-) : UiState {
-    /** 主书架列表：仅在架书籍，叠加分组/有更新筛选与排序 */
-    val filteredBooks: List<Book>
-        get() {
-            var result = books.filter { it.inLibrary }
-            // 分组位掩码相交即命中，一本书可属多个分组
-            if (selectedGroupMask != 0L) {
-                result = result.filter { it.groupFlags and selectedGroupMask != 0L }
-            }
-            if (onlyUpdated) {
-                result = result.filter { it.unreadChapterCount() > 0 }
-            }
-            if (readFilter == "unread") {
-                result = result.filter { it.lastReadChapterIndex == -1 }
-            } else if (readFilter == "reading") {
-                result = result.filter { it.lastReadChapterIndex >= 0 }
-            }
-            return when (sortMode) {
-                "created" -> result.sortedByDescending { it.createTime }
-                "title" -> result.sortedBy { it.title }
-                else -> result.sortedByDescending { it.updateTime }
-            }
-        }
-
-    /** 阅读历史：全部书籍按最后阅读时间倒序（含已移出书架的书） */
-    val historyBooks: List<Book>
-        get() = books.sortedByDescending { it.updateTime }
-}
-
-/** 未读章节数（totalChapters 未知时返回 0） */
-fun Book.unreadChapterCount(): Int =
-    if (totalChapters > 0) (totalChapters - lastReadChapterIndex - 1).coerceAtLeast(0) else 0
-
 private data class CatalogRefreshResult(
     val addedChapterCount: Int = 0,
     val errorMessage: String? = null
 )
-
-/** 备份导入时分组数据的处理策略 */
-enum class BookGroupImportMode {
-    /** 合并：自动创建备份中本机不存在的分组定义，书籍保留原分组归属 */
-    MERGE,
-    /** 移动到现有分组：不创建任何新分组，导入的书全部归入指定的一个本机已有分组 */
-    MOVE_TO_EXISTING
-}
-
-// ==========================================
-// 2. 用户意图 (UiIntent)
-// ==========================================
-sealed class BookshelfUiIntent : UiIntent {
-
-    // --- 基础加载与互动 ---
-    /** 启动观察本地数据库的书架变动流 (通常在 init 中只发一次) */
-    data object ObserveBooks : BookshelfUiIntent()
-
-    /** 用户点击某一本书进行阅读 */
-    data class BookClicked(val book: Book) : BookshelfUiIntent()
-
-    // --- 单书管理操作 ---
-    /** 从书架中移出某本书 */
-    data class DeleteBook(val book: Book) : BookshelfUiIntent()
-
-    /** (可选) 将书本置顶排序 */
-    data class PinBook(val book: Book) : BookshelfUiIntent()
-
-    // --- 离线下载操作 ---
-    /** 开始/继续下载本书 */
-    data class StartDownload(val bookUrl: String, val ruleId: String, val bookTitle: String) : BookshelfUiIntent()
-
-    /** 暂停下载本书 */
-    data class PauseDownload(val bookUrl: String) : BookshelfUiIntent()
-
-    /** 取消下载本书（终止并移除任务记录，区别于暂停） */
-    data class CancelDownload(val bookUrl: String) : BookshelfUiIntent()
-
-    /** 清除所有未完成的下载任务（保留已完成） */
-    data object ClearUnfinishedDownloads : BookshelfUiIntent()
-
-    /** 保存下载并发设置（书本数/图片数），立即生效并持久化 */
-    data class SaveDownloadSettings(val books: Int, val images: Int) : BookshelfUiIntent()
-
-    data object DownloadSelectedBooks : BookshelfUiIntent()
-
-    // 💡 新增：将选中书籍导出为书架备份 JSON（弹窗自选是否含阅读进度）
-    data class ExportSelectedAsJson(
-        val includeProgress: Boolean = true
-    ) : BookshelfUiIntent()
-
-    // 💡 新增：从备份 JSON 导入书籍到书架
-    data class ImportBooks(
-        val jsonContent: String,
-        val groupMode: BookGroupImportMode = BookGroupImportMode.MERGE,
-        val targetGroupId: Long? = null
-    ) : BookshelfUiIntent()
-
-    // 💡 新增：批量将选中书籍打包导出为 ZIP 的意图
-    data class ExportSelectedBooks(val destinationDirectory: String,
-                                   val onlyCached: Boolean,
-                                   val concurrencyLimit: Int,
-                                   val delayMs: Long) : BookshelfUiIntent()
-
-    // 💡 2. 新增：用户点击取消导出的意图
-    data object CancelExport : BookshelfUiIntent()
-
-    // --- 批量与刷新操作 ---
-    /** 用户下拉刷新：触发所有书本的后台更新检测 */
-    data object RefreshBooks : BookshelfUiIntent()
-
-    /** 开启/关闭多选编辑模式 */
-    data object ToggleSelectionMode : BookshelfUiIntent()
-
-    // ---------------- 自定义分组 ----------------
-
-    /** 启动观察分组定义流 (init 中只发一次) */
-    data object ObserveGroups : BookshelfUiIntent()
-
-    /** 切换分组筛选（0 = 全部） */
-    data class SelectGroup(val mask: Long) : BookshelfUiIntent()
-
-    /** 创建自定义分组（自动分配 2^n 掩码） */
-    data class CreateGroup(val name: String, val isAutoUpdate: Boolean) : BookshelfUiIntent()
-
-    /** 修改分组（含名称与是否自动更新） */
-    data class UpdateGroup(val groupId: Long, val newName: String, val isAutoUpdate: Boolean) : BookshelfUiIntent()
-
-    /** 删除分组（书籍归属位同步清除） */
-    data class DeleteGroup(val groupId: Long) : BookshelfUiIntent()
-
-    /** 设置一批书的分组归属（checked=true 加入 / false 移出），支持单书与批量 */
-    data class SetBooksInGroup(val urls: List<String>, val mask: Long, val checked: Boolean) : BookshelfUiIntent()
-
-    /** 从阅读历史把书加回书架 */
-    data class RestoreToShelf(val bookUrl: String) : BookshelfUiIntent()
-
-    /** 从阅读历史彻底删除（物理删除+清全部缓存，不可恢复） */
-    data class PurgeHistoryBook(val bookUrl: String) : BookshelfUiIntent()
-
-    /** 重试某本书上一轮下载失败的章节 */
-    data class RetryFailedChapters(val bookUrl: String) : BookshelfUiIntent()
-
-    // ---------------- 书架排序/筛选/视图 ----------------
-
-    /** 书架排序：recent / created / title（持久化） */
-    data class SetShelfSort(val mode: String) : BookshelfUiIntent()
-
-    /** 书架视图：grid / list（持久化） */
-    data class SetShelfViewMode(val mode: String) : BookshelfUiIntent()
-
-    /** 仅显示有未读章节的书 */
-    data object ToggleOnlyUpdated : BookshelfUiIntent()
-
-    /** 修改未分组书籍的自动更新偏好 */
-    data class SetUpdateUngroupedBooks(val enabled: Boolean) : BookshelfUiIntent()
-
-    /** 阅读进度筛选：all / unread / reading */
-    data class SetReadFilter(val filter: String) : BookshelfUiIntent()
-
-    /** 在多选模式下，选中/取消选中某本书 */
-    data class ToggleSelectBook(val bookUrl: String) : BookshelfUiIntent()
-
-    data object SelectAll: BookshelfUiIntent()
-
-    /** 删除所有选中的书籍 */
-    data object DeleteSelectedBooks : BookshelfUiIntent()
-}
-
-// ==========================================
-// 3. 副作用 (UiEffect)
-// ==========================================
-sealed class BookshelfUiEffect : UiEffect {
-    /** 弹出提示 */
-    data class ShowToast(val message: String) : BookshelfUiEffect()
-
-    /** 💡 书架备份 JSON 已生成，交给平台文件选择器保存 */
-    data class SaveBookshelfBackup(val fileName: String, val content: String) : BookshelfUiEffect()
-
-    /** 💡 导航跳转：进入书籍详情页（可查看目录、换源、续读）*/
-    data class NavigateToDetail(val book: Book) : BookshelfUiEffect()
-}
