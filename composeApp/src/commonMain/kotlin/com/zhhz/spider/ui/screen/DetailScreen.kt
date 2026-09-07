@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -56,6 +55,9 @@ fun DetailScreen(
     val canToggleBookshelf = !uiState.isLoading &&
             !uiState.isCatalogLoading &&
             uiState.currentSource != null
+    val catalogRows = remember(uiState.chapters) {
+        flattenDetailCatalogRows(uiState.chapters)
+    }
 
     LaunchedEffect(detailUrl, ruleId) {
         viewModel.processIntent(DetailUiIntent.LoadDetail(detailUrl, ruleId))
@@ -379,27 +381,32 @@ fun DetailScreen(
                         }
                     }
                 } else {
-                    itemsIndexed(uiState.chapters, key = { _, it -> it.url }) { index, chapter ->
-                        // 如果有卷名，且是第一个元素或者和上一个元素的卷名不同，则显示卷名分类头
-                        val previousChapter = uiState.chapters.getOrNull(index - 1)
-                        if (chapter.group.isNotBlank() && (previousChapter == null || previousChapter.group != chapter.group)) {
-                            Text(
-                                text = chapter.group,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
+                    items(
+                        items = catalogRows,
+                        key = { it.key },
+                        contentType = { it.contentType }
+                    ) { row ->
+                        when (row) {
+                            is DetailCatalogRow.GroupHeader -> {
+                                Text(
+                                    text = row.group,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                            }
+                            is DetailCatalogRow.ChapterItem -> {
+                                ChapterListItem(
+                                    chapter = row.chapter,
+                                    isRead = row.chapter.isRead,
+                                    onClick = { viewModel.processIntent(DetailUiIntent.ChapterClicked(row.chapter)) }
+                                )
+                            }
                         }
-
-                        ChapterListItem(
-                            chapter = chapter,
-                            isRead = chapter.isRead,
-                            onClick = { viewModel.processIntent(DetailUiIntent.ChapterClicked(chapter)) }
-                        )
                     }
                 }
             }

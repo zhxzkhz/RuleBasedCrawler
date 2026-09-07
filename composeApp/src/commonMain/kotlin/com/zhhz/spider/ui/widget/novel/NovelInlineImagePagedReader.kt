@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
@@ -22,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,6 +65,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private sealed interface InlinePageEntry {
     data class Text(val line: TextLine, val trailingSpace: Float) : InlinePageEntry
@@ -113,10 +119,11 @@ internal fun NovelInlineImagePagedReader(
             .focusRequester(focusRequester)
             .focusable()
     ) {
-        val constraints = Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight)
+        val safeDrawingInsets = novelSafeDrawingInsets()
+        val constraints = safeDrawingInsets.applyTo(constraints)
         val screenWidth = constraints.maxWidth.toFloat()
         val screenHeight = constraints.maxHeight.toFloat()
-        val imageWidthPx = constraints.maxWidth - config.margin * density.density * 2
+        val imageWidthPx = (constraints.maxWidth - config.margin * density.density * 2).coerceAtLeast(0f)
 
         LaunchedEffect(block.chapterUrl, block.text, config, constraints) {
             if (constraints.maxWidth <= 0 || constraints.maxHeight <= 0) return@LaunchedEffect
@@ -139,79 +146,83 @@ internal fun NovelInlineImagePagedReader(
             return@BoxWithConstraints
         }
 
-        val pagerState = rememberPagerState(
-            initialPage = uiState.currentProgress.coerceIn(0, pages.lastIndex),
-            pageCount = { pages.size }
-        )
+        key(block.chapterUrl, pages.size, uiState.openAtEnd) {
+            // 菜单或设置面板任一可见时都禁止翻页手势（两者互斥，设置打开时 menu=false）
+            val hudVisible = uiState.isMenuVisible || uiState.isSettingsVisible
+            val pagerState = rememberPagerState(
+                initialPage = initialChapterPageIndex(uiState.openAtEnd, uiState.currentProgress, pages.lastIndex),
+                pageCount = { pages.size }
+            )
+            val navigationMutex = remember { Mutex() }
 
-        fun turnPage(forward: Boolean) {
-            val target = pagerState.currentPage + if (forward) 1 else -1
-            if (target in pages.indices) {
-                scope.launch { pagerState.animateScrollToPage(target) }
-            } else if (forward) {
-                onNext()
-            } else {
-                onPrev()
-            }
-        }
-
-        LaunchedEffect(pagerState, pages.size) {
-            focusRequester.requestFocus()
-            androidx.compose.runtime.snapshotFlow { pagerState.currentPage }
-                .distinctUntilChanged()
-                .debounce(250L)
-                .collectLatest { page -> onProgressUpdate(block.index, page) }
-        }
-
-        VolumeKeyPageEffect(
-            enabled = !uiState.isMenuVisible,
-            onForward = { turnPage(false) },
-            onBackward = { turnPage(true) }
-        )
-
-        HorizontalPager(
-            state = pagerState,
-            userScrollEnabled = !uiState.isMenuVisible,
-            modifier = Modifier
-                .fillMaxSize()
-                .blockReaderGestures(uiState.isMenuVisible, onToggleMenu)
-                .onPreviewKeyEvent { event ->
-                    if (uiState.isMenuVisible) return@onPreviewKeyEvent false
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when (event.key) {
-                        Key.DirectionRight, Key.PageDown, Key.DirectionDown -> {
-                            turnPage(true); true
-                        }
-                        Key.DirectionLeft, Key.PageUp, Key.DirectionUp -> {
-                            turnPage(false); true
-                        }
-                        Key.Home -> {
-                            scope.launch { pagerState.scrollToPage(0) }; true
-                        }
-                        else -> false
-                    }
-                }
-                .pointerInput(pages.size, screenWidth, screenHeight) {
-                    detectTapGestures { offset ->
-                        val target = when {
-                            offset.x < screenWidth / 3 -> pagerState.currentPage - 1
-                            offset.x > screenWidth * 2 / 3 -> pagerState.currentPage + 1
-                            offset.y <= screenHeight * 0.75f -> {
-                                onToggleMenu()
-                                return@detectTapGestures
+            fun turnPage(forward: Boolean, animate: Boolean = true) {
+                if (hudVisible || uiState.isLoading) return
+                scope.launch {
+                    navigationMutex.withLock {
+                        when (val turn = pageTurnTarget(pagerState.currentPage, forward, pages.size)) {
+                            is PageTurn.ToPage -> {
+                                if (animate && uiState.settings.pageAnimation) {
+                                    pagerState.animateScrollToPage(turn.page)
+                                } else {
+                                    pagerState.scrollToPage(turn.page)
+                                }
                             }
-                            else -> return@detectTapGestures
-                        }
-                        if (target in pages.indices) {
-                            scope.launch { pagerState.animateScrollToPage(target) }
-                        } else if (target < 0) {
-                            onPrev()
-                        } else {
-                            onNext()
+                            PageTurn.ToNextChapter -> onNext()
+                            PageTurn.ToPreviousChapter -> onPrev()
                         }
                     }
                 }
-        ) { pageIndex ->
+            }
+
+            LaunchedEffect(pagerState, pages.size) {
+                focusRequester.requestFocus()
+                androidx.compose.runtime.snapshotFlow { pagerState.currentPage }
+                    .distinctUntilChanged()
+                    .debounce(250L)
+                    .collectLatest { page -> onProgressUpdate(block.index, page) }
+            }
+
+            VolumeKeyPageEffect(
+                enabled = !hudVisible,
+                onForward = { turnPage(false) },
+                onBackward = { turnPage(true) }
+            )
+
+            HorizontalPager(
+                state = pagerState,
+                userScrollEnabled = !hudVisible,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .blockReaderGestures(hudVisible, onToggleMenu)
+                    .onPreviewKeyEvent { event ->
+                        if (hudVisible) return@onPreviewKeyEvent false
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionRight, Key.PageDown, Key.DirectionDown -> {
+                                turnPage(true); true
+                            }
+                            Key.DirectionLeft, Key.PageUp, Key.DirectionUp -> {
+                                turnPage(false); true
+                            }
+                            Key.Home -> {
+                                scope.launch { pagerState.scrollToPage(0) }; true
+                            }
+                            else -> false
+                        }
+                    }
+                    .pointerInput(pages.size, screenWidth, screenHeight, hudVisible) {
+                        detectTapGestures { offset ->
+                            if (hudVisible) return@detectTapGestures
+                            when (tapZoneAction(offset.x, offset.y, screenWidth, screenHeight)) {
+                                TapZoneAction.ToggleMenu -> onToggleMenu()
+                                TapZoneAction.Previous -> turnPage(forward = false, animate = false)
+                                TapZoneAction.Next -> turnPage(forward = true, animate = false)
+                                TapZoneAction.None -> Unit
+                            }
+                        }
+                    }
+            ) { pageIndex ->
             InlineNovelPage(
                 page = pages[pageIndex],
                 pageIndex = pageIndex,
@@ -225,6 +236,7 @@ internal fun NovelInlineImagePagedReader(
                 uiState = uiState,
                 context = context
             )
+        }
         }
     }
 }
