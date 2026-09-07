@@ -62,8 +62,10 @@ class MangaCallFactory(
                     JsExtensionClass.jsToJavaObject(JsEngineRunner.eval(it.id, it.globalConfig.headerScript!!, bindings))
                 if (dynamicHeaders is String) {
                     try {
-                        JSON.parseObject(dynamicHeaders, Map::class.java).map { (key, value) ->
-                            newRequestBuilder.set(key.toString(), value.toString())
+                        (JSON.parseObject(dynamicHeaders, Map::class.java) as? Map<*, *>)?.forEach { (key, value) ->
+                            if (key != null && value != null) {
+                                newRequestBuilder.set(key.toString(), value.toString())
+                            }
                         }
                     } catch (e: Exception) {
                         logger.error(e) { "Error parsing dynamic headers" }
@@ -113,8 +115,10 @@ class MangaCallFactory(
                 JsEngineRunner.eval(rule.id, rule.globalConfig.headerScript!!, bindings)
             )
             if (dynamicHeaders is String) {
-                JSON.parseObject(dynamicHeaders, Map::class.java).forEach { (key, value) ->
-                    newRequestBuilder.set(key.toString(), value.toString())
+                (JSON.parseObject(dynamicHeaders, Map::class.java) as? Map<*, *>)?.forEach { (key, value) ->
+                    if (key != null && value != null) {
+                        newRequestBuilder.set(key.toString(), value.toString())
+                    }
                 }
             }
         }

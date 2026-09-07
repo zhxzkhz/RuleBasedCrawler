@@ -255,19 +255,15 @@ object JsExtensionClass {
         builder = builder.headers(
             (JSON.parseObject(
                 header, object : TypeReference<HashMap<String?, String?>?>(){}.type
-            ) as HashMap<String, String>).toHeaders()
+            ) as? HashMap<String, String> ?: HashMap()).toHeaders()
         )
 
         return runBlocking(jsHttpDispatcher) {
             kotlin.runCatching {
-                okHttpClient.newCall(builder.build()).execute().body.string()
+                okHttpClient.newCall(builder.build()).execute().use { it.body.string() }
             }.onFailure {
                 logger.warn { "ajax($url) error: ${it.message}" }
-            }.getOrElse {
-                val byteArrayOutputStream = ByteArrayOutputStream()
-                it.printStackTrace(PrintStream(byteArrayOutputStream))
-                byteArrayOutputStream.toString()
-            }
+            }.getOrNull()
         }
 
     }

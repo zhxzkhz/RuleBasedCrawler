@@ -4,8 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.koin.android.ext.koin.androidContext
 import java.lang.reflect.Field
+
+private val logger = KotlinLogging.logger {}
 
 
 class MainActivity : ComponentActivity() {
@@ -39,7 +42,7 @@ class MainActivity : ComponentActivity() {
             protectedClasses.isAccessible = true
             (protectedClasses.get(null) as HashMap<*, *>).remove("java.lang.Class")
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.warn(e) { "Rhino ClassShutter 初始化失败（非致命）" }
         }
 
         setContent {

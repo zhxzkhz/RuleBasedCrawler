@@ -66,7 +66,7 @@ actual class BookPackager(
                 val diskCache = imageLoader.diskCache
                 if (rule == null || diskCache == null) return@withContext false
 
-                val isMangaMode = true // 💡 TODO: 根据 rule.type == BookType.image 判定
+                val isMangaMode = rule.type == com.zhhz.spider.constant.BookType.image
                 val totalChapters = localChapters.size
                 val safeTitle = localBook.title.replace(Regex("[\\/:*?\"<>|]"), "_").ifBlank { "manga" }
                 val directoryUri = Uri.parse(destinationDirectory)
@@ -174,8 +174,7 @@ actual class BookPackager(
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
-                                logger.error { "第 ${chapterIndex + 1} 章 [${chapter.title}] 打包失败！原因: ${e.message}" }
-                                e.printStackTrace()
+                                logger.error(e) { "第 ${chapterIndex + 1} 章 [${chapter.title}] 打包失败" }
                             } finally {
                                 onProgress(chapterIndex + 1, totalChapters)
                             }
@@ -187,8 +186,7 @@ actual class BookPackager(
                 outputUri?.let { runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) } }
                 throw e
             } catch (e: Exception) {
-                logger.error { "书籍打包导出发生严重错误: ${e.message}" }
-                e.printStackTrace()
+                logger.error(e) { "书籍打包导出发生严重错误" }
                 outputUri?.let { runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) } }
                 false
             }
@@ -232,7 +230,7 @@ actual class BookPackager(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                e.printStackTrace()
+                logger.error(e) { "图片缓存预加载失败 url=${mangaImage.url}" }
                 return null
             }
         }

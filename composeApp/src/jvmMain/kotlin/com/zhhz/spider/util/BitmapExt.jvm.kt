@@ -59,9 +59,9 @@ actual fun Bitmap.descrambleAndEncode(
             else -> EncodedImageFormat.JPEG to 80   // 默认 JPEG
         }
 
-        Image.makeFromBitmap(output).encodeToData(imageFormat, 100)!!.bytes
+        Image.makeFromBitmap(output).encodeToData(imageFormat, 100)?.bytes
     } catch (e: Exception) {
-        e.printStackTrace()
+        logger.error(e) { "图片转字节数组失败" }
         null
     }
 }

@@ -64,7 +64,7 @@ actual fun Bitmap.descrambleAndEncode(
         output.compress(imageFormat, quality, bytes)
         bytes.toByteArray()
     } catch (e: Exception) {
-        e.printStackTrace()
+        logger.error(e) { "图片转字节数组失败" }
         null
     }
 }
