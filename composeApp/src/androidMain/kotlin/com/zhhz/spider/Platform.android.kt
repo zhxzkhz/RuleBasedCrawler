@@ -127,7 +127,7 @@ actual fun VolumeKeyPageEffect(enabled: Boolean, onForward: () -> Unit, onBackwa
         if (enabled) {
             VolumeKeyHub.onVolume = { up ->
                 // 上 = 上一页，下 = 下一页（符合中文阅读器习惯）
-                if (up) currentBackward() else currentForward()
+                if (up) currentForward() else currentBackward()
             }
         }
         onDispose { VolumeKeyHub.onVolume = null }

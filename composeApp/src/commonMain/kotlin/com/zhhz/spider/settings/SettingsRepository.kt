@@ -3,6 +3,13 @@ package com.zhhz.spider.settings
 import com.zhhz.spider.db.SettingsDao
 import com.zhhz.spider.db.SettingsEntity
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -13,6 +20,12 @@ private val logger = KotlinLogging.logger {}
 /**
  * 应用设置持久化：存储在 Room 数据库的 app_settings 表中（key-value 结构）。
  * 清理缓存不会丢失设置。
+ *
+ * 并发模型：
+ * - 所有读写都经由 [mutex] 串行，读不到半写状态；
+ * - [update] 走单一写入者队列：基于"最新已保存设置"应用变换后整份写回，
+ *   高频变更（如拖动滑杆）自动合并，且不会用旧快照覆盖其他模块刚写入的字段；
+ * - 保存运行在仓库自己的应用级作用域上，不随调用方（如阅读器 ViewModel）销毁而取消。
  */
 class SettingsRepository(
     private val settingsDao: SettingsDao,
@@ -54,10 +67,52 @@ class SettingsRepository(
     @Volatile
     private var cachedSettings: AppSettings? = null
 
+    // 仓库级作用域：保存不随调用方（如阅读器 ViewModel）销毁而取消
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mutex = Mutex()
+    private val pendingUpdates = Channel<(AppSettings) -> AppSettings>(Channel.UNLIMITED)
+
+    init {
+        // 单一写入者：锁内基于最新设置依次应用更新并整份写回
+        scope.launch {
+            for (transform in pendingUpdates) {
+                mutex.withLock {
+                    var settings = transform(loadInternal())
+                    // 合并已排队的后续变更，滑杆高频拖动只落盘一次
+                    while (true) {
+                        val next = pendingUpdates.tryReceive().getOrNull() ?: break
+                        settings = next(settings)
+                    }
+                    saveInternal(settings)
+                }
+            }
+        }
+    }
+
+    /**
+     * 异步原子更新：基于最新已保存设置应用 [transform] 后整份写回。
+     * 只改目标字段，不会重置其他设置；重复调用按入队顺序生效，后写覆盖先写。
+     */
+    fun update(transform: (AppSettings) -> AppSettings) {
+        pendingUpdates.trySend(transform)
+    }
+
     /**
      * 从数据库加载设置（首次启动时自动迁移旧 JSON 文件）
      */
-    suspend fun load(): AppSettings {
+    suspend fun load(): AppSettings = mutex.withLock { loadInternal() }
+
+    /**
+     * 保存整份设置到数据库。仅在需要覆盖全部字段时使用；
+     * 修改个别字段请优先使用 [update]，避免旧快照覆盖其他模块的并发修改。
+     */
+    suspend fun save(settings: AppSettings) = mutex.withLock { saveInternal(settings) }
+
+    fun clearCache() {
+        cachedSettings = null
+    }
+
+    private suspend fun loadInternal(): AppSettings {
         cachedSettings?.let { return it }
 
         migrateFromJsonIfNeeded()
@@ -77,9 +132,9 @@ class SettingsRepository(
             readerBackground = map.getLong("readerBackground", 0xFFFAF7F0),
             readerTextColor = map.getLong("readerTextColor", 0xFF333333),
             readerImmersive = map.getBool("readerImmersive", false),
-            readerMangaMode = map["readerMangaMode"] ?: "webtoon",
-            shelfSort = map["shelfSort"] ?: "recent",
-            shelfViewMode = map["shelfViewMode"] ?: "grid",
+            readerMangaMode = map.getString("readerMangaMode", "webtoon"),
+            shelfSort = map.getString("shelfSort", "recent"),
+            shelfViewMode = map.getString("shelfViewMode", "grid"),
             searchHistory = map.getList("searchHistory"),
             ruleSubscriptions = map.getList("ruleSubscriptions"),
             lastUpdateCheckAt = map.getLong("lastUpdateCheckAt", 0),
@@ -87,7 +142,7 @@ class SettingsRepository(
             readerLineSpacing = map.getInt("readerLineSpacing", 10),
             readerParagraphSpacing = map.getInt("readerParagraphSpacing", 5),
             readerMargin = map.getFloat("readerMargin", 40f),
-            readerFontFamily = map["readerFontFamily"] ?: "serif",
+            readerFontFamily = map.getString("readerFontFamily", "serif"),
             readerBrightness = map.getFloat("readerBrightness", 1.0f),
             readerUseAndroidReader = map.getBool("readerUseAndroidReader", false),
             readerPageAnimation = map.getBool("readerPageAnimation", true),
@@ -97,10 +152,7 @@ class SettingsRepository(
         return settings
     }
 
-    /**
-     * 保存设置到数据库
-     */
-    suspend fun save(settings: AppSettings) {
+    private suspend fun saveInternal(settings: AppSettings) {
         runCatching {
             val entries = mapOf(
                 "downloadBooks" to settings.downloadBooks.toString(),
@@ -134,10 +186,6 @@ class SettingsRepository(
         }
     }
 
-    fun clearCache() {
-        cachedSettings = null
-    }
-
     private suspend fun migrateFromJsonIfNeeded() {
         val dir = legacyCacheDir ?: return
         val file = File(dir, "app_settings.json")
@@ -145,7 +193,7 @@ class SettingsRepository(
 
         runCatching {
             val oldSettings = json.decodeFromString<AppSettings>(file.readText())
-            save(oldSettings)
+            saveInternal(oldSettings)
             file.delete()
             logger.info { "已从 JSON 文件迁移设置到数据库" }
         }.onFailure { e ->
@@ -164,6 +212,9 @@ class SettingsRepository(
 
     private fun Map<String, String>.getBool(key: String, default: Boolean): Boolean =
         get(KEY_PREFIX + key)?.toBooleanStrictOrNull() ?: default
+
+    private fun Map<String, String>.getString(key: String, default: String): String =
+        get(KEY_PREFIX + key) ?: default
 
     private fun Map<String, String>.getList(key: String): List<String> =
         get(KEY_PREFIX + key)?.let {

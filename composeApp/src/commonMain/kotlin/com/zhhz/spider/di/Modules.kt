@@ -95,7 +95,7 @@ val commonModule = module {
         bind<CommentRepository>()
     }
 
-    single { SettingsRepository(get(), get<File>(named("cacheDir"))) }
+    single { SettingsRepository(get(), get<File>(named("legacyCacheDir"))) }
 
 
     // ================= 视图模型层 (ViewModel) =================

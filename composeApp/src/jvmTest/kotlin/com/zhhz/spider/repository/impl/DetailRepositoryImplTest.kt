@@ -165,6 +165,8 @@ private class FakeRuleDao : RuleDao {
 
     override fun getAllRulesFlow(): Flow<List<RuleEntity>> = flowOf(emptyList())
 
+    override suspend fun getAllRules(): List<RuleEntity> = emptyList()
+
     override suspend fun getRuleById(id: String): RuleEntity? = null
 
     override suspend fun deleteRule(rule: RuleEntity) = Unit

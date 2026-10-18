@@ -42,7 +42,6 @@ import coil3.memory.MemoryCache
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
-import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Dimension
@@ -54,6 +53,8 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -255,18 +256,24 @@ fun MangaReaderView(
     onPrev: () -> Unit, // 漫画瀑布流通常不用上一章，但可以保留接口以备不时之需
     onRetry: (chapterUrl: String, index: Int) -> Unit = { _, _ -> } // 空章节"重新获取"
 ) {
+    val imageAspectRatios = remember { mutableStateMapOf<String, Float>() }
+
     // 💡 阅读模式分流：webtoon 竖滑 / paged 翻页 / rtl 日漫右开
     when (uiState.settings.mangaMode) {
         "paged", "rtl" -> {
-            MangaPagedView(
-                ruleId = ruleId,
-                uiState = uiState,
-                rtl = uiState.settings.mangaMode == "rtl",
-                onProgressUpdate = onProgressUpdate,
-                onToggleMenu = onToggleMenu,
-                onNext = onNext,
-                onRetry = onRetry
-            )
+            // 非追加式切章时重建 pager，避免沿用旧章节的页码（可能越界）
+            key(uiState.contentResetVersion) {
+                MangaPagedView(
+                    ruleId = ruleId,
+                    uiState = uiState,
+                    rtl = uiState.settings.mangaMode == "rtl",
+                    onProgressUpdate = onProgressUpdate,
+                    onToggleMenu = onToggleMenu,
+                    onNext = onNext,
+                    onPrev = onPrev,
+                    onRetry = onRetry
+                )
+            }
             return
         }
     }
@@ -286,6 +293,17 @@ fun MangaReaderView(
             targetItem
         }
     )
+
+    // 目录跳章/上一章会替换 content.blocks；此时滚动到新章节开头。
+    // 追加下一章（无限滚动）不会递增 contentResetVersion，避免打断当前阅读位置。
+    var handledContentReset by remember { mutableIntStateOf(uiState.contentResetVersion) }
+    LaunchedEffect(uiState.contentResetVersion) {
+        if (handledContentReset != uiState.contentResetVersion) {
+            handledContentReset = uiState.contentResetVersion
+            listState.scrollToItem(0)
+        }
+    }
+
     val interactionSource = remember { MutableInteractionSource() }
     val context = LocalPlatformContext.current
     // 💡 1. 核心判断：提取出当前的“末尾块”，看看它是不是空的
@@ -302,37 +320,65 @@ fun MangaReaderView(
 
     val imageLoader = SingletonImageLoader.get(context)
     var appliedReloadVersion by remember { mutableIntStateOf(0) }
+    val readerWidthsPx = remember { mutableStateSetOf<Int>() }
 
     LaunchedEffect(uiState.imageReloadVersion) {
         if (uiState.imageReloadVersion == 0) return@LaunchedEffect
         val currentBlock = uiState.content.blocks.firstOrNull { it.index == uiState.currentIndex }
             ?: return@LaunchedEffect
         currentBlock.images.forEach { image ->
+            val imageKey = mangaImageIdentity(ruleId, uiState.bookUrl, image.url, currentBlock.isImageDecrypt)
+            imageAspectRatios.remove(imageKey)
+            readerWidthsPx.forEach { width ->
+                imageLoader.memoryCache?.remove(
+                    MemoryCache.Key(
+                        mangaImageMemoryCacheKey(
+                            ruleId,
+                            uiState.bookUrl,
+                            image.url,
+                            currentBlock.isImageDecrypt,
+                            width
+                        )
+                    )
+                )
+            }
             imageLoader.memoryCache?.remove(MemoryCache.Key(image.url))
             imageLoader.diskCache?.remove(image.url)
         }
         appliedReloadVersion = uiState.imageReloadVersion
     }
 
-    val buildRequest: (MangaImage, Boolean) -> ImageRequest = { mangaImage, isImageDecrypt ->
+    val buildRequest: (MangaImage, Boolean, Int) -> ImageRequest = { mangaImage, isImageDecrypt, targetWidth ->
         imageRequest(ruleId, uiState.bookUrl, mangaImage, isImageDecrypt, context)
-    }
-    val buildPreloadRequest: (MangaImage, Boolean) -> ImageRequest = { mangaImage, isImageDecrypt ->
-        buildRequest(mangaImage, isImageDecrypt).newBuilder()
-            .memoryCachePolicy(CachePolicy.DISABLED)
-            .size(1, 1)
+            .newBuilder()
+            .memoryCacheKey(
+                mangaImageMemoryCacheKey(
+                    ruleId,
+                    uiState.bookUrl,
+                    mangaImage.url,
+                    isImageDecrypt,
+                    targetWidth
+                )
+            )
+            .apply {
+                if (targetWidth > 0) size(Dimension.Pixels(targetWidth), Dimension.Undefined)
+            }
             .build()
+    }
+    val buildPreloadRequest: (MangaImage, Boolean, Int) -> ImageRequest = { mangaImage, isImageDecrypt, targetWidth ->
+        buildRequest(mangaImage, isImageDecrypt, targetWidth)
     }
     val preloadedImages = remember { mutableSetOf<String>() }
 
     // 内容到达后立即预取首屏及下一屏，避免预取依赖第一次滚动事件。
-    LaunchedEffect(flattenedImages, uiState.currentProgress) {
+    LaunchedEffect(flattenedImages, uiState.currentProgress, readerWidthsPx.toList()) {
+        val targetWidth = readerWidthsPx.maxOrNull() ?: return@LaunchedEffect
         val preloadStart = calculateImageIndex(uiState.content.blocks, uiState.currentProgress)
             .coerceIn(0, flattenedImages.size)
         flattenedImages.drop(preloadStart).take(3).forEach { entry ->
-            val key = "${entry.image.url}|${entry.isImageDecrypt}"
+            val key = "${mangaImageIdentity(ruleId, uiState.bookUrl, entry.image.url, entry.isImageDecrypt)}|$targetWidth"
             if (preloadedImages.add(key)) {
-                imageLoader.enqueue(buildPreloadRequest(entry.image, entry.isImageDecrypt))
+                imageLoader.enqueue(buildPreloadRequest(entry.image, entry.isImageDecrypt, targetWidth))
             }
         }
     }
@@ -370,9 +416,10 @@ fun MangaReaderView(
                 val imagesToPreload = flattenedImages.subList(startIndex, endIndex)
 
                 imagesToPreload.forEach { entry ->
-                    val key = "${entry.image.url}|${entry.isImageDecrypt}"
+                    val targetWidth = readerWidthsPx.maxOrNull() ?: return@forEach
+                    val key = "${mangaImageIdentity(ruleId, uiState.bookUrl, entry.image.url, entry.isImageDecrypt)}|$targetWidth"
                     if (preloadedImages.add(key)) {
-                        imageLoader.enqueue(buildPreloadRequest(entry.image, entry.isImageDecrypt))
+                        imageLoader.enqueue(buildPreloadRequest(entry.image, entry.isImageDecrypt, targetWidth))
                     }
                 }
             }
@@ -512,11 +559,13 @@ fun MangaReaderView(
                 } else {
 
                     // 2. 渲染该章节的所有图片（带加载占位与页码提示）
-                    itemsIndexed(block.images, key = { _, item -> item.url }) { imageIndex, image ->
+                    itemsIndexed(block.images, key = { _, item -> "${block.index}|${item.url}" }) { imageIndex, image ->
                         var retryVersion by remember(image.url) { mutableIntStateOf(0) }
 
                         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                             val targetWidth = constraints.maxWidth
+                            SideEffect { readerWidthsPx.add(targetWidth) }
+                            val imageKey = mangaImageIdentity(ruleId, uiState.bookUrl, image.url, block.isImageDecrypt)
                             // Decode to the viewport width instead of the source image's full size.
                             // This is the expensive operation that otherwise blocks scrolling when a
                             // new page enters the viewport.
@@ -527,18 +576,23 @@ fun MangaReaderView(
                                 appliedReloadVersion,
                                 targetWidth
                             ) {
-                                buildRequest(image, block.isImageDecrypt).newBuilder()
-                                    .size(Dimension.Pixels(targetWidth), Dimension.Undefined)
-                                    .build()
+                                buildRequest(image, block.isImageDecrypt, targetWidth)
                             }
 
                             MangaPageItem(
                                 request = request,
                                 pageIndex = imageIndex + 1,
                                 pageCount = block.images.size,
+                                aspectRatio = imageAspectRatios[imageKey],
                                 placeholderBg = pagePlaceholderBg,
                                 onPlaceholder = onPlaceholder,
-                                onRetry = { retryVersion++ },
+                                onRetry = {
+                                    imageAspectRatios.remove(imageKey)
+                                    retryVersion++
+                                },
+                                onImageAspectRatio = { ratio ->
+                                    if (imageAspectRatios[imageKey] != ratio) imageAspectRatios[imageKey] = ratio
+                                },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -598,11 +652,14 @@ private fun MangaPagedView(
     onProgressUpdate: (Int, Int) -> Unit,
     onToggleMenu: () -> Unit,
     onNext: () -> Unit,
+    onPrev: () -> Unit,
     onRetry: (chapterUrl: String, index: Int) -> Unit
 ) {
     val context = LocalPlatformContext.current
     val imageLoader = SingletonImageLoader.get(context)
     val scope = rememberCoroutineScope()
+    val hudVisible = uiState.isMenuVisible || uiState.isSettingsVisible
+    val navigationMutex = remember { Mutex() }
 
     val themeBackground = Color(uiState.settings.backgroundColor)
     val themeOnBackground = Color(uiState.settings.textColor)
@@ -665,25 +722,28 @@ private fun MangaPagedView(
     )
     val pagerFocusRequester = remember { FocusRequester() }
 
-    val buildRequest: (MangaImage, Boolean) -> ImageRequest = { img, dec ->
+    val buildRequest: (MangaImage, Boolean, Int) -> ImageRequest = { img, dec, targetWidth ->
         imageRequest(ruleId, uiState.bookUrl, img, dec, context)
+            .newBuilder()
+            .memoryCacheKey(mangaImageMemoryCacheKey(ruleId, uiState.bookUrl, img.url, dec, targetWidth))
+            .apply {
+                if (targetWidth > 0) size(Dimension.Pixels(targetWidth), Dimension.Undefined)
+            }
+            .build()
     }
     val preloaded = remember { mutableSetOf<String>() }
+    var pagerWidthPx by remember { mutableIntStateOf(0) }
 
-    // 邻页预加载 ±2
-    LaunchedEffect(pagerState, pages) {
+    // 邻页预加载 ±2；使用与显示相同的解码宽度和内存缓存键。
+    LaunchedEffect(pagerState, pages, pagerWidthPx) {
+        if (pagerWidthPx <= 0) return@LaunchedEffect
         snapshotFlow { pagerState.currentPage }.distinctUntilChanged().collect { page ->
             (page - 2..page + 2).forEach { p ->
                 if (p in pages.indices) {
                     val meta = pages[p]
-                    val key = "${meta.image.url}|${meta.isDecrypt}"
+                    val key = "${mangaImageIdentity(ruleId, uiState.bookUrl, meta.image.url, meta.isDecrypt)}|$pagerWidthPx"
                     if (preloaded.add(key)) {
-                        imageLoader.enqueue(
-                            buildRequest(meta.image, meta.isDecrypt).newBuilder()
-                                .memoryCachePolicy(CachePolicy.DISABLED)
-                                .size(1, 1)
-                                .build()
-                        )
+                        imageLoader.enqueue(buildRequest(meta.image, meta.isDecrypt, pagerWidthPx))
                     }
                 }
             }
@@ -698,26 +758,34 @@ private fun MangaPagedView(
             .collect { page ->
                 val meta = pages.getOrNull(page) ?: return@collect
                 onProgressUpdate(meta.chapterIndex, meta.inChapter - 1) // 💡 必须使用章内图片索引！
-                // 距离末尾 1 页且还有下一章 → 自动追加
-                if (!rtl && page >= totalPages - 2 && uiState.hasNext && !uiState.isLoading) onNext()
+                // 距离末尾 1 页且还有下一章 → 自动追加（RTL 的阅读终点同样是最后一页）
+                if (page >= totalPages - 2 && uiState.hasNext && !uiState.isLoading) onNext()
             }
     }
 
     /** 统一的翻页动作：越界时向前翻页触发上一章，向后翻页触发下一章 */
     fun turnPage(forward: Boolean) {
-        val target = pagerState.currentPage + if (forward) 1 else -1
-        if (target in 0 until totalPages) {
-            scope.launch { pagerState.animateScrollToPage(target) }
-        } else if (forward) {
-            onNext()
+        if (hudVisible || uiState.isLoading) return
+        scope.launch {
+            navigationMutex.withLock {
+                // 锁内重新读取当前页，连续点击不会都基于旧页码计算目标
+                val target = pagerState.currentPage + if (forward) 1 else -1
+                if (target in 0 until totalPages) {
+                    pagerState.animateScrollToPage(target)
+                } else if (forward) {
+                    onNext()
+                } else {
+                    onPrev()
+                }
+            }
         }
     }
 
-    // 💡 音量键翻页（Android 生效；桌面端无操作）
+    // 💡 音量键翻页（Android 生效；桌面端无操作），HUD 打开时禁用
     com.zhhz.spider.VolumeKeyPageEffect(
-        enabled = true,
-        onForward = { turnPage(forward = !rtl) },   // 音量下=下一页（日漫对调）
-        onBackward = { turnPage(forward = rtl) }
+        enabled = !hudVisible,
+        onForward = { turnPage(forward = false) },
+        onBackward = { turnPage(forward = true) }
     )
 
     BoxWithConstraints(
@@ -727,6 +795,7 @@ private fun MangaPagedView(
             .focusRequester(pagerFocusRequester)
             .focusable()
             .onPreviewKeyEvent { e ->
+                if (hudVisible) return@onPreviewKeyEvent false
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (e.key) {
                     Key.DirectionRight -> { turnPage(forward = !rtl); true }
@@ -752,16 +821,17 @@ private fun MangaPagedView(
         HorizontalPager(
             state = pagerState,
             reverseLayout = rtl,
+            userScrollEnabled = !hudVisible,
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val meta = pages[page]
             var retryKey by remember(page) { mutableIntStateOf(0) }
 
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                val request = remember(meta.image.url, meta.isDecrypt, retryKey, constraints.maxWidth) {
-                    buildRequest(meta.image, meta.isDecrypt).newBuilder()
-                        .size(Dimension.Pixels(constraints.maxWidth), Dimension.Undefined)
-                        .build()
+                val targetWidth = constraints.maxWidth
+                SideEffect { pagerWidthPx = targetWidth }
+                val request = remember(meta.image.url, meta.isDecrypt, retryKey, targetWidth) {
+                    buildRequest(meta.image, meta.isDecrypt, targetWidth)
                 }
 
                 // 缩放偏移越界钳制（graphicsLayer 以中心为原点缩放）
@@ -951,20 +1021,36 @@ private fun MangaPageItem(
     request: ImageRequest,
     pageIndex: Int,
     pageCount: Int,
+    aspectRatio: Float?,
     placeholderBg: Color,
     onPlaceholder: Color,
     onRetry: () -> Unit,
+    onImageAspectRatio: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var painterState by remember(request) { mutableStateOf<AsyncImagePainter.State?>(null) }
+    val stableAspectRatio = aspectRatio?.takeIf { it.isFinite() && it > 0f }
+    val pageModifier = if (stableAspectRatio != null) {
+        modifier.fillMaxWidth().aspectRatio(stableAspectRatio)
+    } else {
+        modifier.fillMaxWidth().heightIn(min = 300.dp)
+    }
+    val imageModifier = if (stableAspectRatio != null) Modifier.fillMaxSize()
+    else Modifier.fillMaxWidth().heightIn(min = 300.dp)
 
-    Box(modifier = modifier.fillMaxWidth().heightIn(min = 300.dp)) {
+    Box(modifier = pageModifier) {
         AsyncImage(
             model = request,
             contentDescription = null,
             contentScale = ContentScale.FillWidth,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
-            onState = { painterState = it }
+            modifier = imageModifier,
+            onState = { state ->
+                painterState = state
+                if (state is AsyncImagePainter.State.Success) {
+                    val size = state.painter.intrinsicSize
+                    validImageAspectRatio(size.width, size.height)?.let(onImageAspectRatio)
+                }
+            }
         )
 
         when (painterState) {
@@ -983,22 +1069,24 @@ private fun MangaPageItem(
             }
 
             null, is AsyncImagePainter.State.Empty, is AsyncImagePainter.State.Loading -> {
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(300.dp).background(placeholderBg),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            color = onPlaceholder,
-                            strokeWidth = 3.dp,
-                            modifier = Modifier.size(34.dp)
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            "第 $pageIndex / $pageCount 张",
-                            color = onPlaceholder.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.labelMedium
-                        )
+                if (stableAspectRatio == null) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(300.dp).background(placeholderBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                color = onPlaceholder,
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(34.dp)
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "第 $pageIndex / $pageCount 张",
+                                color = onPlaceholder.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
                     }
                 }
             }

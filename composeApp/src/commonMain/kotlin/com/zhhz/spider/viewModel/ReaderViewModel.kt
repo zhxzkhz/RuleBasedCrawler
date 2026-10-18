@@ -16,9 +16,11 @@ import com.zhhz.spider.ui.base.UiState
 import com.zhhz.spider.util.retry
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -41,39 +43,48 @@ class ReaderViewModel(
         private const val PRELOAD_COUNT = 5
         private const val MAX_RETRIES = 3
         private const val RETRY_DELAY_BASE_MS = 1000L
-    }
 
-    /** 最近一次持久化的应用设置（含阅读器），变更时整体写回 */
-    private var persistedSettings = com.zhhz.spider.settings.SettingsRepository.AppSettings()
+        /**
+         * 退出阅读器时的最后一次进度落盘。
+         * viewModelScope 在 onCleared 时已被取消，不能再用来保证写入完成，
+         * 因此使用应用级作用域，只承载一次性的最终保存。
+         */
+        private val progressFlushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    }
 
     init {
         // 启动时异步加载阅读设置
         viewModelScope.launch {
-            val saved = settingsRepository.load()
-            persistedSettings = saved
+            val saved = runCatching { settingsRepository.load() }
+                .onFailure { logger.error(it) { "加载阅读设置失败" } }
+                .getOrElse { com.zhhz.spider.settings.SettingsRepository.AppSettings() }
             updateState {
-                copy(settings = ReaderSettings(
-                    fontSize = saved.readerFontSize,
-                    backgroundColor = saved.readerBackground,
-                    textColor = saved.readerTextColor,
-                    mangaMode = saved.readerMangaMode,
-                    lineSpacing = saved.readerLineSpacing,
-                    paragraphSpacing = saved.readerParagraphSpacing,
-                    margin = saved.readerMargin,
-                    fontFamily = saved.readerFontFamily,
-                    brightness = saved.readerBrightness,
-                    useAndroidReader = saved.readerUseAndroidReader,
-                    pageAnimation = saved.readerPageAnimation
-                ))
+                copy(
+                    settingsLoaded = true,
+                    settings = ReaderSettings(
+                        fontSize = saved.readerFontSize,
+                        backgroundColor = saved.readerBackground,
+                        textColor = saved.readerTextColor,
+                        mangaMode = saved.readerMangaMode,
+                        lineSpacing = saved.readerLineSpacing,
+                        paragraphSpacing = saved.readerParagraphSpacing,
+                        margin = saved.readerMargin,
+                        fontFamily = saved.readerFontFamily,
+                        brightness = saved.readerBrightness,
+                        useAndroidReader = saved.readerUseAndroidReader,
+                        pageAnimation = saved.readerPageAnimation
+                    )
+                )
             }
         }
     }
 
-    /** 更新内存缓存并异步落盘，避免阻塞 UI 线程 */
+    /**
+     * 持久化设置变更：交给 SettingsRepository 的应用级更新队列，
+     * 基于最新已保存设置只改目标字段；保存不随本 ViewModel 销毁而取消。
+     */
     private fun persistSettings(transform: (com.zhhz.spider.settings.SettingsRepository.AppSettings) -> com.zhhz.spider.settings.SettingsRepository.AppSettings) {
-        persistedSettings = transform(persistedSettings)
-        val snapshot = persistedSettings
-        viewModelScope.launch { runCatching { settingsRepository.save(snapshot) } }
+        settingsRepository.update(transform)
     }
 
     @Volatile private var saveChapterIndex = 0
@@ -105,7 +116,8 @@ class ReaderViewModel(
                 }
             }
             is ReaderUiIntent.NavigateBack -> {
-                handleUpdateReadProgress(uiState.value.currentIndex, uiState.value.currentProgress)
+                // 直接落盘，不依赖 500ms 防抖任务（导航后 ViewModel 会立即被清理）
+                flushProgressNow()
                 sendEffect(ReaderUiEffect.NavigateBack)
             }
             is ReaderUiIntent.UpdateReadProgress -> handleUpdateReadProgress(intent.index, intent.progress)
@@ -191,6 +203,17 @@ class ReaderViewModel(
     }
 
     private fun handleInitAndFetch(bookUrl: String, chapterIndex: Int, ruleId: String) {
+        // 从目录页返回时 ReaderScreen 会重新进入组合并再次派发 Init。
+        // 此时 ViewModel 里已有同一本书的内容，若重新初始化会把用户刚选的章节
+        // 强行改回路由参数里的旧 chapterIndex，因此这里直接忽略重复初始化。
+        if (uiState.value.bookUrl == bookUrl &&
+            uiState.value.ruleId == ruleId &&
+            uiState.value.content.blocks.isNotEmpty() &&
+            uiState.value.catalogList.isNotEmpty()
+        ) {
+            return
+        }
+
         updateState { copy(bookUrl = bookUrl, ruleId = ruleId, isLoading = true) }
 
         viewModelScope.launch {
@@ -291,8 +314,21 @@ class ReaderViewModel(
         }
     }
 
-    private fun fetchChapterContent(url: String, index: Int, ruleId: String, progress: Int = 0, isAppend: Boolean = false) {
-        updateState { copy(chapterUrl = url, isLoading = !isAppend) }
+    private fun fetchChapterContent(
+        url: String,
+        index: Int,
+        ruleId: String,
+        progress: Int = 0,
+        isAppend: Boolean = false,
+        openAtEnd: Boolean = false
+    ) {
+        updateState {
+            copy(
+                chapterUrl = url,
+                isLoading = !isAppend,
+                openAtEnd = openAtEnd && !isAppend
+            )
+        }
 
         viewModelScope.launch {
             try {
@@ -328,13 +364,16 @@ class ReaderViewModel(
                     copy(
                         // 💡 修复：如果是追加预加载完成，绝对不修改 currentIndex 和 title
                         currentIndex = if (!isAppend) index else this.currentIndex,
-                        currentProgress = if (!isAppend) progress else this.currentProgress,
+                        currentProgress = if (!isAppend && !openAtEnd) progress else if (isAppend) this.currentProgress else 0,
                         title = if (!isAppend) currentChapterTitle else this.title,
                         // 💡 修复：绝对不能乱盖 currentProgress！保留当前滑动进度！
                         content = ChapterContent(isManga = isMangaMode, blocks = updatedBlocks),
+                        // 非追加式切章（目录跳章/上一章）时递增，漫画阅读器据此重置滚动/翻页位置
+                        contentResetVersion = if (isAppend) this.contentResetVersion else this.contentResetVersion + 1,
                         isLoading = false,
                         hasNext = index < catalogList.size - 1,
-                        hasPrev = index > 0
+                        hasPrev = index > 0,
+                        openAtEnd = openAtEnd && !isAppend
                     )
                 }
 
@@ -352,7 +391,7 @@ class ReaderViewModel(
                 preloadChaptersSerially(startIndex = index, ruleId = ruleId)
                 pruneChapterJobs(index)
 
-                if (!isAppend) {
+                if (!isAppend && !openAtEnd) {
                     handleUpdateReadProgress(index, progress)
                 }
             } catch (e: CancellationException) {
@@ -361,6 +400,8 @@ class ReaderViewModel(
                 updateState {
                     copy(
                         content = ChapterContent(blocks = listOf(ChapterBlock(chapterUrl = "", text = "加载失败: ${e.message}", index = index))),
+                        // 加载失败同样替换了内容，后续成功加载时漫画阅读器需要重新定位
+                        contentResetVersion = contentResetVersion + 1,
                         isLoading = false
                     )
                 }
@@ -371,14 +412,21 @@ class ReaderViewModel(
     }
 
     private fun handleMoveChapter(offset: Int) {
-        val targetIndex = uiState.value.currentIndex + offset
-        val targetChapter = uiState.value.catalogList.getOrNull(targetIndex)
+        val state = uiState.value
+        if (state.isLoading) return
+        val targetIndex = state.currentIndex + offset
+        val targetChapter = state.catalogList.getOrNull(targetIndex)
 
         if (targetChapter != null) {
-            // 💡 修复：对于漫画且向下滑动（offset > 0）时，必须开启 isAppend = true 进行追加！
-            // 对于小说或向上滑动，则是覆盖替换（isAppend = false）
-            val isAppend = uiState.value.bookType == BookType.image && offset > 0
-            fetchChapterContent(targetChapter.url, targetIndex, uiState.value.ruleId, isAppend = isAppend)
+            // 漫画向后继续追加，小说切章时上一章从末页打开、下一章从首页打开。
+            val isAppend = state.bookType == BookType.image && offset > 0
+            fetchChapterContent(
+                targetChapter.url,
+                targetIndex,
+                state.ruleId,
+                isAppend = isAppend,
+                openAtEnd = state.bookType == BookType.text && offset < 0
+            )
         } else {
             sendEffect(ReaderUiEffect.ShowToast("没有更多章节了"))
         }
@@ -443,13 +491,15 @@ class ReaderViewModel(
     private fun handleUpdateReadProgress(index: Int, progress: Int = 0) {
         val state = uiState.value
 
-        if (saveChapterIndex == index && saveChapterProgress == progress) return
+        // openAtEnd 场景下即使页码与上次保存一致，也要清掉标记并同步 UI 状态
+        if (!state.openAtEnd && saveChapterIndex == index && saveChapterProgress == progress) return
 
         val activeChapter = state.catalogList.getOrNull(index)
         updateState {
             copy(
                 currentIndex = index,
                 currentProgress = progress,
+                openAtEnd = false,
                 title = activeChapter?.title ?: title
             )
         }
@@ -475,6 +525,39 @@ class ReaderViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * 立即落盘当前阅读进度（取消防抖任务）。
+     * 用于返回键、导航离开阅读器、ViewModel 销毁等“最后一次保存”场景。
+     * 写入使用应用级作用域，保证导航导致的 viewModelScope 取消不会吞掉这次保存。
+     */
+    fun flushProgressNow() {
+        val state = uiState.value
+        if (!state.isInBookshelf || state.bookUrl.isBlank() || state.currentIndex < 0) return
+
+        saveProgressJob?.cancel()
+        saveChapterIndex = state.currentIndex
+        saveChapterProgress = state.currentProgress
+        val chapter = state.catalogList.getOrNull(state.currentIndex)
+
+        progressFlushScope.launch {
+            runCatching {
+                readerRepository.saveBookReadProgress(
+                    bookUrl = state.bookUrl,
+                    chapterIndex = state.currentIndex,
+                    pageIndex = state.currentProgress,
+                    chapterTitle = chapter?.title.orEmpty(),
+                    chapterUrl = chapter?.url.orEmpty()
+                )
+            }.onFailure { logger.error(it) { "退出阅读器时保存阅读进度失败" } }
+        }
+    }
+
+    override fun onCleared() {
+        // DisposableEffect 通常已经保存过；这里兜底处理直接销毁 ViewModel 的场景
+        flushProgressNow()
+        super.onCleared()
     }
 
     private fun preloadChaptersSerially(startIndex: Int, ruleId: String) {
@@ -575,6 +658,8 @@ data class ReaderUiState(
     val ruleId: String = "",
     val currentIndex: Int = -1,
     val currentProgress: Int = 0,
+    // 上一章从末页打开时仅在当前阅读会话内生效，不写入持久化进度
+    val openAtEnd: Boolean = false,
     // 控制上下页按钮状态
     val hasNext: Boolean = false,
     val hasPrev: Boolean = false,
@@ -587,11 +672,15 @@ data class ReaderUiState(
     val isLoading: Boolean = true,
     val isMenuVisible: Boolean = false, // 点击屏幕中央显示的菜单状态
     val imageReloadVersion: Int = 0,
+    // 非追加式切章时递增；漫画阅读器据此重置 LazyColumn/Pager 的位置
+    val contentResetVersion: Int = 0,
 
     // 空章节"重新获取"进行中的章节索引（-1 = 无）
     val retryingChapterIndex: Int = -1,
 
     val settings: ReaderSettings = ReaderSettings(),
+    // 持久化设置是否已加载完成；未完成前阅读器保持加载态，避免默认排版闪现
+    val settingsLoaded: Boolean = false,
     val isSettingsVisible: Boolean = false // 排版设置面板状态
 
 ) : UiState

@@ -104,9 +104,11 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
             return cachedClient
         }
 
-        // 重建 client 前清理旧实例的连接池，防止线程泄漏
+        // 重建 client 前只清理连接池：newBuilder() 与 baseClient 共享同一个 Dispatcher
+        // 与 ConnectionPool，shutdown 共享的 executorService 会让 baseClient 以及所有
+        // 已缓存 client 后续的异步请求直接抛 RejectedExecutionException。
+        // （当前全项目都是同步 execute()，不经过该线程池，所以这个问题很隐蔽）
         cachedClient?.let {
-            it.dispatcher.executorService.shutdown()
             it.connectionPool.evictAll()
         }
 
@@ -143,4 +145,3 @@ data class FetchRequest(
     val proxy: Proxy? = null,           // 代理服务器
     val customDns: String? = null       // DNS 配置字段
 )
-

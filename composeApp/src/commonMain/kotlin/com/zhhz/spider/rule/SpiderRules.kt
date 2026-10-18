@@ -415,6 +415,10 @@ fun SourceRule.supportsExplore(): Boolean =
             exploreDetailUrlSelector().steps.isNotEmpty()
 
 fun RuleEntity.toDomain(): SourceRule {
-    return Json.decodeFromString<SourceRule>(jsonContent)
+    // ⚠️ 必须以实体主键为准：SourceRule.id 的默认值是 UUID.randomUUID()，
+    // 而 kotlinx 反序列化遇到缺失字段会每次重新求值默认值，
+    // 因此 jsonContent 中没有 id 的规则（订阅导入最常见）每次解析都会得到新的随机 id，
+    // 导致书架保存的 ruleId 对不上、书打不开、会话与缓存全部失效。
+    return Json.decodeFromString<SourceRule>(jsonContent).copy(id = this.id)
     //return JSON.parseObject(this.jsonContent, SourceRule::class.java, JSONReader.Feature.FieldBased)
 }

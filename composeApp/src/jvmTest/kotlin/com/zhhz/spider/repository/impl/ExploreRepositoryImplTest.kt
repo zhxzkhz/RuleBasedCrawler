@@ -337,6 +337,7 @@ private class FakeExploreRuleRepository(
 private class FakeExploreRuleDao : RuleDao {
     override suspend fun saveRule(rule: RuleEntity) = Unit
     override fun getAllRulesFlow(): Flow<List<RuleEntity>> = flowOf(emptyList())
+    override suspend fun getAllRules(): List<RuleEntity> = emptyList()
     override suspend fun getRuleById(id: String): RuleEntity? = null
     override suspend fun deleteRule(rule: RuleEntity) = Unit
     override suspend fun getSession(ruleId: String): SessionEntity? = null

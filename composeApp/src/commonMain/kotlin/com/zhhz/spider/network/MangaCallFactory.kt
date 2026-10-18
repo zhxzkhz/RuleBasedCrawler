@@ -28,11 +28,18 @@ class MangaCallFactory(
 
     override fun newCall(request: okhttp3.Request): okhttp3.Call {
         val ruleId = request.headers["X-Internal-Rule-Id"]
+        // 图片请求自带书籍标识，优先用它定位上下文，避免依赖「全局当前书」——
+        // 后台多本下载与阅读并发时，getActiveContext 会取到另一本书的上下文（Cookie/变量）
+        val bookUrl = request.headers["X-Internal-Book-Url"]
 
         val (ctx, rule) = ruleId?.let { id ->
             // 采用专用调度器，避免阻塞通用 IO 线程池和主线程
             runBlocking(mangaCallDispatcher) {
-                val context = contextSessionManager.getActiveContext(sessionRepository,id)
+                val context = if (!bookUrl.isNullOrBlank()) {
+                    contextSessionManager.getContext(bookUrl, id)
+                } else {
+                    contextSessionManager.getActiveContext(sessionRepository, id)
+                }
                 val activeRule = ruleRepository.getEnabledRules().find { it.id == id }
 
                 if (activeRule != null) {

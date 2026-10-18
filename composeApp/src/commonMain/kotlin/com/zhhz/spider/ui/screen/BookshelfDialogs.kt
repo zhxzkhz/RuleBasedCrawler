@@ -388,13 +388,20 @@ fun ManageGroupsDialog(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "选 \"全部\" 表示不筛选。重启 app 后生效。",
+                    "选中左侧单选框设置默认入口；选择“全部”表示不筛选。重启 app 后生效。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
                 Spacer(Modifier.height(8.dp))
+                Text(
+                    "已有分组（${groups.size}）",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+
                 Column(
-                    modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState()),
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Row(
@@ -405,62 +412,51 @@ fun ManageGroupsDialog(
                         Spacer(Modifier.width(4.dp))
                         Text("全部", fontSize = 14.sp)
                     }
-                    groups.forEach { group ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable { onSelectStartMask(group.mask) }.padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(selected = currentStartMask == group.mask, onClick = { onSelectStartMask(group.mask) })
-                            Spacer(Modifier.width(4.dp))
-                            Text(group.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
 
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(vertical = 12.dp)
-                )
-
-                Text(
-                    "已有分组（${groups.size}）",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(6.dp))
-
-                if (groups.isEmpty()) {
-                    Text("还没有分组", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
-                } else {
-                    Column(
-                        modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
+                    if (groups.isEmpty()) {
+                        Text("还没有分组", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
+                    } else {
                         groups.forEach { group ->
                             if (editingId == group.id) {
-                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        OutlinedTextField(
-                                            value = editingName,
-                                            onValueChange = { editingName = it },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        TextButton(
-                                            onClick = {
-                                                if (editingName.isNotBlank()) onUpdate(group.id, editingName, editingIsAutoUpdate)
-                                                editingId = null
-                                            },
-                                            enabled = editingName.isNotBlank()
-                                        ) { Text("保存") }
-                                    }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Checkbox(checked = editingIsAutoUpdate, onCheckedChange = { editingIsAutoUpdate = it == true })
-                                        Text("允许自动更新（追更检测）", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    RadioButton(
+                                        selected = currentStartMask == group.mask,
+                                        onClick = { onSelectStartMask(group.mask) }
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            OutlinedTextField(
+                                                value = editingName,
+                                                onValueChange = { editingName = it },
+                                                singleLine = true,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(
+                                                onClick = {
+                                                    if (editingName.isNotBlank()) onUpdate(group.id, editingName, editingIsAutoUpdate)
+                                                    editingId = null
+                                                },
+                                                enabled = editingName.isNotBlank()
+                                            ) { Text("保存") }
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = editingIsAutoUpdate, onCheckedChange = { editingIsAutoUpdate = it == true })
+                                            Text("允许自动更新（追更检测）", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
                                     }
                                 }
                             } else {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = currentStartMask == group.mask,
+                                        onClick = { onSelectStartMask(group.mask) }
+                                    )
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(

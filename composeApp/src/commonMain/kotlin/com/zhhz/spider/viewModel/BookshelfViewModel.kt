@@ -93,16 +93,12 @@ class BookshelfViewModel(
                 viewModelScope.launch { downloadManager.cancelUnfinished() }
             }
             is BookshelfUiIntent.SaveDownloadSettings -> {
-                viewModelScope.launch {
-                    settingsRepository.save(
-                        com.zhhz.spider.settings.SettingsRepository.AppSettings(
-                            downloadBooks = intent.books,
-                            downloadImages = intent.images
-                        )
-                    )
-                    downloadManager.updateConcurrency(intent.books, intent.images)
-                    sendEffect(BookshelfUiEffect.ShowToast("下载并发已保存：${intent.books} 本 / ${intent.images} 张图"))
+                // 基于最新设置只改下载并发字段，绝不能整份覆盖（否则会重置阅读器/书架设置）
+                settingsRepository.update {
+                    it.copy(downloadBooks = intent.books, downloadImages = intent.images)
                 }
+                downloadManager.updateConcurrency(intent.books, intent.images)
+                sendEffect(BookshelfUiEffect.ShowToast("下载并发已保存：${intent.books} 本 / ${intent.images} 张图"))
             }
 
             is BookshelfUiIntent.ExportSelectedBooks -> handleExportSelectedBooks(
@@ -136,29 +132,17 @@ class BookshelfViewModel(
             is BookshelfUiIntent.SetShelfSort -> {
                 updateState { copy(sortMode = intent.mode) }
                 // 排序偏好持久化，下次启动保持
-                viewModelScope.launch {
-                    runCatching {
-                        settingsRepository.save(settingsRepository.load().copy(shelfSort = intent.mode))
-                    }
-                }
+                settingsRepository.update { it.copy(shelfSort = intent.mode) }
             }
             is BookshelfUiIntent.SetShelfViewMode -> {
                 updateState { copy(viewMode = intent.mode) }
-                viewModelScope.launch {
-                    runCatching {
-                        settingsRepository.save(settingsRepository.load().copy(shelfViewMode = intent.mode))
-                    }
-                }
+                settingsRepository.update { it.copy(shelfViewMode = intent.mode) }
             }
             is BookshelfUiIntent.SetReadFilter -> updateState { copy(readFilter = intent.filter) }
             is BookshelfUiIntent.ToggleOnlyUpdated -> updateState { copy(onlyUpdated = !onlyUpdated) }
             is BookshelfUiIntent.SetUpdateUngroupedBooks -> {
                 updateState { copy(updateUngroupedBooks = intent.enabled) }
-                viewModelScope.launch {
-                    runCatching {
-                        settingsRepository.save(settingsRepository.load().copy(updateUngroupedBooks = intent.enabled))
-                    }
-                }
+                settingsRepository.update { it.copy(updateUngroupedBooks = intent.enabled) }
             }
             is BookshelfUiIntent.CreateGroup -> {
                 viewModelScope.launch {
@@ -215,11 +199,7 @@ class BookshelfViewModel(
                 updateState { copy(showStartGroupDialog = true) }
             }
             is BookshelfUiIntent.SetStartDefaultGroupMask -> {
-                viewModelScope.launch {
-                    runCatching {
-                        settingsRepository.save(settingsRepository.load().copy(appStartDefaultGroupMask = intent.mask))
-                    }
-                }
+                settingsRepository.update { it.copy(appStartDefaultGroupMask = intent.mask) }
             }
         }
     }
@@ -415,11 +395,7 @@ class BookshelfViewModel(
                 sendEffect(BookshelfUiEffect.ShowToast(message))
 
                 // 记录本次追更检查时间（供节流自动刷新使用）
-                runCatching {
-                    settingsRepository.save(
-                        settingsRepository.load().copy(lastUpdateCheckAt = System.currentTimeMillis())
-                    )
-                }
+                settingsRepository.update { it.copy(lastUpdateCheckAt = System.currentTimeMillis()) }
             } catch (e: CancellationException) {
                 throw e
             } finally {

@@ -4,6 +4,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.ChapterDao
+import com.zhhz.spider.repository.impl.decodeCachedNovelChapter
 import com.zhhz.spider.viewModel.MangaImage
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
@@ -14,7 +15,7 @@ import okio.Path
 import org.koin.core.component.KoinComponent
 import org.koin.core.qualifier.named
 import org.koin.java.KoinJavaComponent.get
-import com.zhhz.spider.util.toMd5
+import com.zhhz.spider.util.chapterCacheFileName
 
 private val logger = KotlinLogging.logger {}
 
@@ -61,18 +62,22 @@ class BookCleanupManager(
             val diskCache = SingletonImageLoader.get(platformContext).diskCache
 
             for (chapter in chapters) {
-                val safeFileName = "${"$ruleId|$bookUrl|${chapter.url}".toMd5()}.txt"
+                val safeFileName = chapterCacheFileName(ruleId, bookUrl, chapter.url)
                 val cacheFile = textCacheDirectory / safeFileName
                 if (!fileSystem.exists(cacheFile)) continue
 
-                // 漫画清单文件：读出图片 URL，从 Coil 磁盘缓存按键移除
+                // 漫画清单 / 小说内联插图：解析出图片 URL 后从 Coil 磁盘缓存移除
                 runCatching {
                     val content = fileSystem.read(cacheFile) { readUtf8() }
-                    if (content.trimStart().startsWith("[")) {
-                        json.decodeFromString<List<MangaImage>>(content).forEach { img ->
-                            val removed = diskCache?.remove(img.url)
-                            if (removed == true) removedImages++
-                        }
+                    val trimmed = content.trimStart()
+                    val images = when {
+                        trimmed.startsWith("[") -> json.decodeFromString<List<MangaImage>>(content)
+                        trimmed.startsWith("{") -> decodeCachedNovelChapter(content)?.inlineImages.orEmpty()
+                        else -> emptyList()
+                    }
+                    images.forEach { img ->
+                        val removed = diskCache?.remove(img.url)
+                        if (removed == true) removedImages++
                     }
                 }.onFailure { logger.warn(it) { "解析章节缓存清单失败 chapter=${chapter.url}" } }
 

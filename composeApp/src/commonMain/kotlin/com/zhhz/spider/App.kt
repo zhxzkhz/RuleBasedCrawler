@@ -131,7 +131,7 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
 
         val scope = rememberCoroutineScope()
 
-        var isDebug by remember { mutableStateOf(System.getenv("isDebug").toBoolean()) }
+        var isDebug by remember { mutableStateOf(System.getenv("isDebug")?.toBoolean() == true) }
         var editorOpenedFromManagement by remember { mutableStateOf(false) }
         //isDebug = true
 

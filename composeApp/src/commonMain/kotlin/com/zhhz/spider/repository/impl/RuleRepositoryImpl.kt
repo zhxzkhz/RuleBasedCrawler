@@ -10,6 +10,7 @@ import com.zhhz.spider.rule.SourceRule
 import com.zhhz.spider.rule.toDomain
 import com.zhhz.spider.util.toMd5
 // import com.zhhz.spider.rule.SourceRule
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,12 +24,18 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
+private val logger = KotlinLogging.logger {}
+
 class RuleRepositoryImpl(
     private val ruleDao: RuleDao,
     private val httpFetcher: HttpFetcher
 ) : RuleRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var initialLoadDone = false
+    private val initialLoadLock = Any()
 
     // 缓存 1：原始数据（供 UI 管理页展示）
     private val _rawRulesCache = MutableStateFlow<List<RuleEntity>>(emptyList())
@@ -49,14 +56,40 @@ class RuleRepositoryImpl(
                             entity.toDomain()
                         } catch (e: Exception) {
                             // 解析失败的规则直接过滤掉，保证爬虫引擎拿到的绝对是健康的数据
-                            e.printStackTrace()
+                            logger.error(e) { "规则解析失败 id=${entity.id} name=${entity.name}" }
                             null
                         }
                     }
 
                 // 3. 存入已解析缓存
                 _parsedRulesCache.value = parsedList
+                // 首帧数据已到达，getEnabledRules() 之后不再需要同步兜底
+                initialLoadDone = true
             }
+        }
+    }
+
+    /**
+     * 首次同步兜底装载。
+     * 解析缓存由 init 里的 Flow 异步填充，createdAtStart() 只保证对象被创建、
+     * 不保证首帧数据已到达；冷启动后立刻搜索会拿到空列表并抛「没有启用任何书源」。
+     * 只在第一次访问时执行一次，之后走内存缓存。
+     */
+    private fun ensureInitialLoad() {
+        if (initialLoadDone) return
+        synchronized(initialLoadLock) {
+            if (initialLoadDone) return
+            runCatching { runBlocking(Dispatchers.IO) { ruleDao.getAllRules() } }
+                .onSuccess { entities ->
+                    _rawRulesCache.value = entities
+                    _parsedRulesCache.value = entities.filter { it.isEnabled }.mapNotNull { entity ->
+                        runCatching { entity.toDomain() }
+                            .onFailure { e -> logger.error(e) { "规则解析失败 id=${entity.id}" } }
+                            .getOrNull()
+                    }
+                }
+                .onFailure { e -> logger.error(e) { "规则缓存首次装载失败" } }
+            initialLoadDone = true
         }
     }
 
@@ -66,6 +99,8 @@ class RuleRepositoryImpl(
 
     override fun getEnabledRules(): List<SourceRule> {
         // 搜索时调用这里：0延迟、0解析消耗，直接拿到可用模型！
+        // 首次调用做一次同步兜底装载，避免启动窗口内返回空列表
+        ensureInitialLoad()
         return _parsedRulesCache.value
     }
 

@@ -148,16 +148,12 @@ class SearchViewModel(
         if (trimmed.isEmpty()) return
         val updated = (listOf(trimmed) + uiState.value.searchHistory.filter { it != trimmed }).take(10)
         updateState { copy(searchHistory = updated) }
-        viewModelScope.launch {
-            runCatching { settingsRepository.save(settingsRepository.load().copy(searchHistory = updated)) }
-        }
+        settingsRepository.update { it.copy(searchHistory = updated) }
     }
 
     private fun handleClearSearchHistory() {
         updateState { copy(searchHistory = emptyList()) }
-        viewModelScope.launch {
-            runCatching { settingsRepository.save(settingsRepository.load().copy(searchHistory = emptyList())) }
-        }
+        settingsRepository.update { it.copy(searchHistory = emptyList()) }
     }
 
     // 逻辑一：全新搜索

@@ -12,7 +12,7 @@ import com.zhhz.spider.repository.ReaderRepository
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.rule.RuleParser
-import com.zhhz.spider.util.toMd5
+import com.zhhz.spider.util.chapterCacheFileName
 import com.zhhz.spider.viewModel.ChapterBlock
 import com.zhhz.spider.viewModel.MangaImage
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +59,7 @@ class ReaderRepositoryImpl(
             val targetBookUrl = bookUrl ?: sessionRepository.loadData()?.url ?: ""
             val ctx = contextSessionManager.getContext(targetBookUrl,ruleId)
 
-            val safeFileName = "${"$ruleId|$targetBookUrl|$chapterUrl".toMd5()}.txt"
+            val safeFileName = chapterCacheFileName(ruleId, targetBookUrl, chapterUrl)
             val cacheFile  = textCacheDirectory / safeFileName
 
             // 统一离线判定：只要磁盘上有这个文件，说明百分之百缓存成功了！
@@ -168,14 +168,16 @@ class ReaderRepositoryImpl(
         chapterUrl: String?
     ) {
         withContext(Dispatchers.IO) {
-            // 假设你的 BookDao 里有根据 url 查询书籍的方法
+            // 以实体为准回写阅读进度（含章节序号与页内进度）
             val book = bookDao.getBookByUrl(bookUrl)
 
             if (book != null) {
                 // 更新该书籍的最后阅读章节及时间
                 val updatedBook = book.copy(
-                    lastReadChapterUrl = chapterUrl ?: book.lastReadChapterUrl,
-                    lastReadChapterTitle = chapterTitle,
+                    lastReadChapterUrl = chapterUrl?.takeIf { it.isNotBlank() } ?: book.lastReadChapterUrl,
+                    lastReadChapterTitle = chapterTitle.ifBlank { book.lastReadChapterTitle },
+                    lastReadChapterIndex = chapterIndex, // ⚠️ 原实现忽略该参数，进度未真正落库
+                    lastReadPageIndex = pageIndex,
                     updateTime = System.currentTimeMillis() // 记录最后阅读时间用于书架排序
                 )
 
@@ -210,7 +212,7 @@ class ReaderRepositoryImpl(
 }
 
 @Serializable
-private data class CachedNovelChapter(
+internal data class CachedNovelChapter(
     val text: String,
     val inlineImages: List<MangaImage>
 )
@@ -289,7 +291,7 @@ private fun resolveNovelImageUrl(rawUrl: String, chapterUrl: String): String {
         .getOrDefault(rawUrl)
 }
 
-private fun decodeCachedNovelChapter(cachedData: String): CachedNovelChapter? =
+internal fun decodeCachedNovelChapter(cachedData: String): CachedNovelChapter? =
     runCatching { Json.decodeFromString<CachedNovelChapter>(cachedData) }.getOrNull()
 
 internal fun decodeImageHeaders(

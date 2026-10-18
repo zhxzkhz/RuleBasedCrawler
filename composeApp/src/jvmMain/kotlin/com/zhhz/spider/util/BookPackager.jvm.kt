@@ -11,6 +11,7 @@ import com.zhhz.spider.manager.imageRequest
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.ReaderRepository
 import com.zhhz.spider.repository.RuleRepository
+import com.zhhz.spider.repository.impl.decodeCachedNovelChapter
 import com.zhhz.spider.rule.SourceRule
 import com.zhhz.spider.viewModel.ChapterBlock
 import com.zhhz.spider.viewModel.MangaImage
@@ -82,7 +83,7 @@ actual class BookPackager(
                             ensureActive()
 
                             try {
-                                val safeFileName = "${chapter.url.toMd5()}.txt"
+                                val safeFileName = chapterCacheFileName(rule.id, bookUrl, chapter.url)
                                 val cacheFile = chapterCacheDirectory / safeFileName
 
                                 if (!onlyCached || fileSystem.exists(cacheFile)) {
@@ -98,7 +99,10 @@ actual class BookPackager(
                                                 index = chapter.index
                                             )
                                         } else {
-                                            val text = fileSystem.read(cacheFile) { readUtf8() }
+                                            // 含插图的小说缓存是 CachedNovelChapter JSON，
+                                            // 导出时必须还原为纯文本，不能把 JSON 原样写进 .txt
+                                            val rawText = fileSystem.read(cacheFile) { readUtf8() }
+                                            val text = decodeCachedNovelChapter(rawText)?.text ?: rawText
                                             ChapterBlock(chapterUrl = chapter.url, chapterTitle = chapter.title, text = text, index = chapter.index)
                                         }
                                     } else {

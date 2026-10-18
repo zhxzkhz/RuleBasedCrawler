@@ -186,7 +186,15 @@ class DownloadManager(
                                                 val request = imageRequest(
                                                     ruleId, bookUrl, mangaImage, block.isImageDecrypt, platformContext
                                                 )
-                                                imageLoader.execute(request)
+                                                // Coil 失败时不会抛异常，只会返回 ErrorResult；
+                                                // 必须显式转成异常，才能让本章进入 failedUrls 供重试。
+                                                val result = imageLoader.execute(request)
+                                                if (result is coil3.request.ErrorResult) {
+                                                    throw IllegalStateException(
+                                                        "图片下载失败: ${mangaImage.url}",
+                                                        result.throwable
+                                                    )
+                                                }
                                             }
                                         }
                                     }

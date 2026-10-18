@@ -24,17 +24,24 @@ abstract class AppDatabase : RoomDatabase() {
  */
 val MIGRATION_3_4 = object : Migration(3, 4) {
     override fun migrate(connection: SQLiteConnection) {
+        // ⚠️ 必须与 ChapterEntity 的最终 schema 完全一致（列名 / 主键 / 索引 / 外键）：
+        // 旧实现建的是 (bookUrl,url) 复合主键 + name/index 列，与实体
+        // （自增 id 主键 + title/indexNum + index_chapters_bookUrl 索引）不符，
+        // Room 跑完迁移路径后做 schema 校验会直接抛
+        // "Migration didn't properly handle: chapters"。
         connection.execSQL("""
             CREATE TABLE IF NOT EXISTS `chapters` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `bookUrl` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
                 `url` TEXT NOT NULL,
-                `name` TEXT NOT NULL,
-                `index` INTEGER NOT NULL,
-                `isRead` INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY(`bookUrl`, `url`),
+                `indexNum` INTEGER NOT NULL,
+                `isRead` INTEGER NOT NULL,
                 FOREIGN KEY(`bookUrl`) REFERENCES `books`(`detailUrl`) ON UPDATE NO ACTION ON DELETE CASCADE
             )
         """.trimIndent())
+        // groupName 由 MIGRATION_9_10 追加，此处不要提前创建
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_chapters_bookUrl` ON `chapters` (`bookUrl`)")
     }
 }
 

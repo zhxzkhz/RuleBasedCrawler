@@ -45,6 +45,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Android 原生小说阅读器（使用 TextPaint + nativeCanvas 渲染）
@@ -109,20 +111,31 @@ actual fun AndroidNovelReader(
         }
 
         if (textPages.isNotEmpty()) {
-            key(currentBlock.chapterUrl, text) {
+            key(currentBlock.chapterUrl, text, uiState.openAtEnd) {
+            // 菜单或设置面板任一可见时都禁止翻页手势（两者互斥，设置打开时 menu=false）
+            val hudVisible = uiState.isMenuVisible || uiState.isSettingsVisible
             val pagerState = rememberPagerState(
-                initialPage = uiState.currentProgress.coerceIn(0, textPages.size - 1),
+                initialPage = initialChapterPageIndex(uiState.openAtEnd, uiState.currentProgress, textPages.lastIndex),
                 pageCount = { textPages.size }
             )
+            val navigationMutex = remember { Mutex() }
 
-            fun turnPage(forward: Boolean) {
-                val target = pagerState.currentPage + if (forward) 1 else -1
-                if (target in textPages.indices) {
-                    scope.launch { pagerState.animateScrollToPage(target) }
-                } else if (forward) {
-                    onNext()
-                } else {
-                    onPrev()
+            fun turnPage(forward: Boolean, animate: Boolean = true) {
+                if (hudVisible || uiState.isLoading) return
+                scope.launch {
+                    navigationMutex.withLock {
+                        when (val turn = pageTurnTarget(pagerState.currentPage, forward, textPages.size)) {
+                            is PageTurn.ToPage -> {
+                                if (animate && uiState.settings.pageAnimation) {
+                                    pagerState.animateScrollToPage(turn.page)
+                                } else {
+                                    pagerState.scrollToPage(turn.page)
+                                }
+                            }
+                            PageTurn.ToNextChapter -> onNext()
+                            PageTurn.ToPreviousChapter -> onPrev()
+                        }
+                    }
                 }
             }
 
@@ -137,19 +150,19 @@ actual fun AndroidNovelReader(
             }
 
             VolumeKeyPageEffect(
-                enabled = !uiState.isMenuVisible,
+                enabled = !hudVisible,
                 onForward = { turnPage(false) },
                 onBackward = { turnPage(true) }
             )
 
             HorizontalPager(
                 state = pagerState,
-                userScrollEnabled = !uiState.isMenuVisible,
+                userScrollEnabled = !hudVisible,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blockReaderGestures(uiState.isMenuVisible, onToggleMenu)
+                    .blockReaderGestures(hudVisible, onToggleMenu)
                     .onPreviewKeyEvent { event ->
-                        if (uiState.isMenuVisible) return@onPreviewKeyEvent false
+                        if (hudVisible) return@onPreviewKeyEvent false
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (event.key) {
                             Key.DirectionRight, Key.PageDown, Key.DirectionDown -> { turnPage(true); true }
@@ -158,23 +171,14 @@ actual fun AndroidNovelReader(
                             else -> false
                         }
                     }
-                    .pointerInput(textPages.size, screenWidth, screenHeight) {
+                    .pointerInput(textPages.size, screenWidth, screenHeight, hudVisible) {
                         detectTapGestures { offset ->
-                            val target = when {
-                                offset.x < screenWidth / 3 -> pagerState.currentPage - 1
-                                offset.x > screenWidth * 2 / 3 -> pagerState.currentPage + 1
-                                offset.y <= screenHeight * 0.75f -> {
-                                    onToggleMenu()
-                                    return@detectTapGestures
-                                }
-                                else -> return@detectTapGestures
-                            }
-                            if (target in textPages.indices) {
-                                scope.launch { pagerState.animateScrollToPage(target) }
-                            } else if (target < 0) {
-                                onPrev()
-                            } else {
-                                onNext()
+                            if (hudVisible) return@detectTapGestures
+                            when (tapZoneAction(offset.x, offset.y, screenWidth, screenHeight)) {
+                                TapZoneAction.ToggleMenu -> onToggleMenu()
+                                TapZoneAction.Previous -> turnPage(forward = false, animate = false)
+                                TapZoneAction.Next -> turnPage(forward = true, animate = false)
+                                TapZoneAction.None -> Unit
                             }
                         }
                     }

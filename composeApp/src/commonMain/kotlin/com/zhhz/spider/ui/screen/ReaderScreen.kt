@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -109,9 +110,19 @@ fun ReaderScreen(
         }
     }
 
-    // 💡 处理全局返回键/Esc
-    PlatformBackHandler(enabled = uiState.isMenuVisible || uiState.isSettingsVisible) {
-        viewModel.processIntent(ReaderUiIntent.ToggleMenu)
+    // 💡 处理全局返回键/Esc：HUD 可见时先收起，HUD 隐藏时直接退出阅读器
+    PlatformBackHandler(enabled = true) {
+        if (uiState.isMenuVisible || uiState.isSettingsVisible) {
+            viewModel.processIntent(ReaderUiIntent.ToggleMenu)
+        } else {
+            viewModel.processIntent(ReaderUiIntent.NavigateBack)
+        }
+    }
+
+    // 离开阅读页（系统返回、跳目录、切换页面）时立即保存最后一次阅读进度，
+    // 不依赖 ViewModel 中仍在防抖的保存任务
+    DisposableEffect(Unit) {
+        onDispose { viewModel.flushProgressNow() }
     }
 
     Scaffold(
@@ -123,7 +134,8 @@ fun ReaderScreen(
         ) {
 
             // 阅读内容：铺满全屏，菜单以悬浮 HUD 形式叠加（不挤压内容、无二次布局跳动）
-            if (uiState.isLoading) {
+            // 设置未加载完成前保持加载态，避免先用默认排版渲染再跳回保存值
+            if (uiState.isLoading || !uiState.settingsLoaded) {
                 LoadingBox(Modifier.align(Alignment.Center))
             } else {
                 when (uiState.bookType) {

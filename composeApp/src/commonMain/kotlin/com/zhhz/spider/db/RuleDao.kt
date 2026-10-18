@@ -11,6 +11,10 @@ interface RuleDao {
     @Query("SELECT * FROM rules ORDER BY updateTime DESC")
     fun getAllRulesFlow(): Flow<List<RuleEntity>>
 
+    /** 一次性读取（供缓存首次同步装载兜底，消除启动竞态） */
+    @Query("SELECT * FROM rules ORDER BY updateTime DESC")
+    suspend fun getAllRules(): List<RuleEntity>
+
     @Query("SELECT * FROM rules WHERE id = :id")
     suspend fun getRuleById(id: String): RuleEntity?
 
