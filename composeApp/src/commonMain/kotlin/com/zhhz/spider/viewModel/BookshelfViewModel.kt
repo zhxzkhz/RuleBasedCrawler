@@ -413,11 +413,13 @@ class BookshelfViewModel(
         updateState { copy(refreshBookTitle = book.title) }
         return try {
             val localChapters = catalogRepository.loadData(book.url)
-            val detail = detailRepository.fetchData(book.url, book.ruleId)
+            // 追更是显式的用户意图：绕过网页快照，否则永远读到旧目录页刷不出新章节
+            val detail = detailRepository.fetchData(book.url, book.ruleId, bypassSnapshotCache = true)
             val chapters = catalogRepository.fetchData(
                 catalogUrl = detail.catalogUrl,
                 ruleId = book.ruleId,
-                bookUrl = book.url
+                bookUrl = book.url,
+                bypassSnapshotCache = true
             )
             check(chapters.isNotEmpty()) { "获取到的章节目录为空" }
             catalogRepository.saveData(book.url, chapters)

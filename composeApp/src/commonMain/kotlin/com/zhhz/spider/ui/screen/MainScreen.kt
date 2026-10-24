@@ -115,6 +115,7 @@ fun MainScreen(
 
         var ctx by remember(currentRule.id) { mutableStateOf<VariableContext>(mutableMapOf()) }
         var remoteAddress by remember { mutableStateOf("http://192.168.1.2:8765") }
+        var remoteToken by remember { mutableStateOf("") }
         var remoteClient by remember { mutableStateOf<RuleEditorRemoteClient?>(null) }
         var remoteRules by remember { mutableStateOf<List<RuleEntity>>(emptyList()) }
         var remoteStatus by remember { mutableStateOf<String?>(null) }
@@ -454,11 +455,18 @@ fun MainScreen(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.secondaryContainer
                 ) {
-                    Text(
-                        "PC 规则服务: ${ruleEditorServerAddress() ?: "请连接 Wi-Fi"}",
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        fontSize = 12.sp
-                    )
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Text(
+                            "PC 规则服务: ${ruleEditorServerAddress() ?: "请连接 Wi-Fi"}",
+                            fontSize = 12.sp
+                        )
+                        // 显示配对令牌：桌面端首次连接时输入此令牌完成鉴权
+                        Text(
+                            "配对令牌: ${com.zhhz.spider.remote.RuleEditorPairing.token}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
                 }
             }
         }
@@ -504,6 +512,12 @@ fun MainScreen(
                             label = { Text("Android 地址") },
                             singleLine = true
                         )
+                        OutlinedTextField(
+                            value = remoteToken,
+                            onValueChange = { remoteToken = it },
+                            label = { Text("配对令牌（Android 端规则 IDE 左下角显示）") },
+                            singleLine = true
+                        )
                         Text("确保 PC 与 Android 在同一局域网，服务端口为 8765。", fontSize = 12.sp)
                         remoteStatus?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                     }
@@ -511,8 +525,13 @@ fun MainScreen(
                 confirmButton = {
                     Button(onClick = {
                         scope.launch {
+                            val token = remoteToken.trim()
+                            if (token.isEmpty()) {
+                                remoteStatus = "请输入 Android 端显示的配对令牌"
+                                return@launch
+                            }
                             remoteStatus = "连接中..."
-                            val client = RuleEditorRemoteClient(remoteAddress)
+                            val client = RuleEditorRemoteClient(remoteAddress, token)
                             runCatching {
                                 val health = client.health()
                                 refreshRemoteRules(client)

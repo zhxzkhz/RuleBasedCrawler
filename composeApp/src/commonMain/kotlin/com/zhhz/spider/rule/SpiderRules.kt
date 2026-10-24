@@ -7,6 +7,7 @@ import com.alibaba.fastjson2.annotation.JSONType
 import com.zhhz.spider.constant.BookType
 import com.zhhz.spider.db.RuleEntity
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.*
@@ -349,14 +350,17 @@ data class SourceRule(
     val catalog: CatalogPage = CatalogPage(),
     val content: ContentPage = ContentPage(),
     val explore: ExplorePage = ExplorePage(),
-    val comment: CommentPage = CommentPage()
+    val comment: CommentPage = CommentPage(),
+    // 规则最后保存时间（来自 RuleEntity.updateTime，不参与 JSON 序列化）：
+    // 作为网页快照缓存的盐，规则一改快照自动失效
+    @Transient val updatedAt: Long = 0L
 )
 
 /** 规则是否配置了可用的评论规则 */
 fun SourceRule.supportsComments(): Boolean =
     comment.listSelector.steps.isNotEmpty() && comment.contentSelector.steps.isNotEmpty()
 
-data class TagAction(val useCache: Boolean)
+data class TagAction(val useCache: Boolean, val cacheSalt: String = "")
 
 // 💡 1. 纯净的 Kotlin 扩展函数，支持任意子集的闭环切换
 fun StepType.nextIn(allowedTypes: List<StepType>): StepType {
@@ -419,6 +423,7 @@ fun RuleEntity.toDomain(): SourceRule {
     // 而 kotlinx 反序列化遇到缺失字段会每次重新求值默认值，
     // 因此 jsonContent 中没有 id 的规则（订阅导入最常见）每次解析都会得到新的随机 id，
     // 导致书架保存的 ruleId 对不上、书打不开、会话与缓存全部失效。
-    return Json.decodeFromString<SourceRule>(jsonContent).copy(id = this.id)
+    // updatedAt 同理取实体值：作为快照缓存盐，规则保存后旧快照自动失效。
+    return Json.decodeFromString<SourceRule>(jsonContent).copy(id = this.id, updatedAt = this.updateTime)
     //return JSON.parseObject(this.jsonContent, SourceRule::class.java, JSONReader.Feature.FieldBased)
 }

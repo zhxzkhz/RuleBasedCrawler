@@ -211,7 +211,9 @@ class DetailViewModel(
                         )
                     }
                     if (uiState.value.title.isBlank()) {
-                        sessionRepository.saveData(localBook)
+                        // 数据库实体不含 availableSources：带上函数开头已解析的书源列表，
+                        // 否则加载本地书会清空多书源信息导致"换源"只能用一次
+                        sessionRepository.saveData(localBook.copy(availableSources = availableSources))
                     }
                 }
 
@@ -245,9 +247,12 @@ class DetailViewModel(
                 return@launch
             }
 
-            val detailData = detailRepository.fetchData(detailUrl, ruleId)
+            val detailData = detailRepository.fetchData(detailUrl, ruleId, bypassSnapshotCache = forceReload)
 
             // 💡 自动派发：网页数据回来后，拼装成完整的 Book，自动更新内存 Session 和会话克隆
+            // availableSources 必须继承当前列表：换源后仍保留全部书源供再次切换，
+            // 并确保当前选择的源在列表中（本地库直进或单源进入时列表可能为空）
+            val currentSources = uiState.value.availableSources
             val updatedBook = Book(
                 title = detailData.title.ifBlank { uiState.value.title },
                 author = detailData.author.ifBlank { uiState.value.author },
@@ -255,7 +260,11 @@ class DetailViewModel(
                 url = detailUrl,
                 ruleId = ruleId,
                 lastReadChapterIndex = uiState.value.lastReadChapterIndex,
-                lastReadChapterTitle = uiState.value.lastReadChapterTitle
+                lastReadChapterTitle = uiState.value.lastReadChapterTitle,
+                availableSources = with(currentSources) {
+                    if (any { it.ruleId == ruleId && it.url == detailUrl }) this
+                    else this + SearchBookSource(ruleId = ruleId, sourceName = "", url = detailUrl)
+                }
             )
             sessionRepository.saveData(updatedBook)
 
@@ -274,8 +283,8 @@ class DetailViewModel(
                 )
             }
 
-            // 2. 请求目录
-            val chapterList = catalogRepository.fetchData(detailData.catalogUrl, ruleId)
+            // 2. 请求目录（手动刷新/换源时 forceReload=true，同步绕过快照拿最新目录）
+            val chapterList = catalogRepository.fetchData(detailData.catalogUrl, ruleId, bypassSnapshotCache = forceReload)
             updateState {
                 copy(
                     chapters = chapterList,

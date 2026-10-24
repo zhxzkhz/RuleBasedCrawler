@@ -25,7 +25,8 @@ class DetailRepositoryImpl(
 ) : DetailRepository {
     override suspend fun fetchData(
         detailUrl: String,
-        ruleId: String
+        ruleId: String,
+        bypassSnapshotCache: Boolean
     ): BookDetail {
         val rule = ruleRepository.getEnabledRules().find { it.id == ruleId }
             ?: throw Exception("找不到对应的书源规则")
@@ -33,7 +34,7 @@ class DetailRepositoryImpl(
             val ctx = contextSessionManager.getContext(detailUrl, ruleId)
             ctx["bookUrl"] = detailUrl
             // 1. 抓取详情页 HTML
-            val bookDetailHtml = fetchTaskRunner.fetch(rule, rule.detail, detailUrl, ctx)
+            val bookDetailHtml = fetchTaskRunner.fetch(rule, rule.detail, detailUrl, ctx, bypassSnapshotCache = bypassSnapshotCache)
             bookDetailHtml.throwIfCrawlerError(rule, CrawlerStage.DETAIL)
             ctx["bookDetailHtml"] = bookDetailHtml
             // 2. 解析基本信息

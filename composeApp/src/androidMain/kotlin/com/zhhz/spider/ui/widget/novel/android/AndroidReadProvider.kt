@@ -5,9 +5,11 @@ import android.text.TextPaint
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import com.zhhz.spider.ui.widget.novel.NovelElement
+import com.zhhz.spider.ui.widget.novel.NovelPageCache
 import com.zhhz.spider.ui.widget.novel.ReadBookConfig
 import com.zhhz.spider.ui.widget.novel.TextLine
 import com.zhhz.spider.ui.widget.novel.TextPage
+import com.zhhz.spider.ui.widget.novel.novelPageCacheKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -29,6 +31,10 @@ object AndroidReadProvider {
         config: ReadBookConfig,
         density: Density
     ): List<TextPage> {
+        // 同一章且排版参数/尺寸未变时直接复用上次分页结果，跳过昂贵的测宽与重排
+        val cacheKey = novelPageCacheKey(text, constraints.maxWidth, constraints.maxHeight, config)
+        NovelPageCache.get(cacheKey)?.let { return it }
+
         return withContext(Dispatchers.Default) {
             val layoutPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 textAlign = Paint.Align.LEFT
@@ -84,7 +90,9 @@ object AndroidReadProvider {
                 }
             }
 
-            generateAllTextPage(lines, constraints, config, density, layoutPaint)
+            val pages = generateAllTextPage(lines, constraints, config, density, layoutPaint)
+            NovelPageCache.put(cacheKey, pages)
+            pages
         }
     }
 

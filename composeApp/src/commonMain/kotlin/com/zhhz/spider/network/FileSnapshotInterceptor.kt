@@ -9,7 +9,31 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import java.io.File
 
 class FileSnapshotInterceptor(private val cacheDir: File) : Interceptor {
+
+    companion object {
+        /** 快照键格式版本标记：键里加入规则指纹后，旧格式文件全部作废，一次性清理 */
+        private const val FORMAT_MARKER = ".snapshot-v2"
+    }
+
+    private var formatUpgraded = false
+
+    private fun upgradeSnapshotFormatOnce() {
+        if (formatUpgraded) return
+        synchronized(this) {
+            if (formatUpgraded) return
+            val marker = File(cacheDir, FORMAT_MARKER)
+            if (!marker.exists()) {
+                runCatching {
+                    cacheDir.listFiles()?.forEach { it.delete() }
+                    marker.createNewFile()
+                }
+            }
+            formatUpgraded = true
+        }
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
+        upgradeSnapshotFormatOnce()
         val request = chain.request()
 
         // 从 Request 中提取指令
@@ -20,7 +44,7 @@ class FileSnapshotInterceptor(private val cacheDir: File) : Interceptor {
             return chain.proceed(request)
         }
 
-        val cacheKey = request.generateCacheKey()
+        val cacheKey = request.generateCacheKey(tagAction.cacheSalt)
         val cacheFile = File(cacheDir, cacheKey)
 
         // 如果非强制刷新且文件存在，返回缓存
@@ -59,11 +83,12 @@ private fun Request.extractBody(): String {
     }
 }
 
-fun Request.generateCacheKey(): String {
+fun Request.generateCacheKey(cacheSalt: String = ""): String {
     val method = this.method
     val url = this.url.toString()
     val bodyContent = if (method == "POST") extractBody() else ""
 
-    // 组合后哈希。包含 bodyContent 确保了 POST 请求的唯一性
-    return "$method|$url|$bodyContent".toMd5()
+    // 组合后哈希。包含 bodyContent 确保了 POST 请求的唯一性；
+    // cacheSalt（规则指纹）保证规则修改后同一 URL 的旧快照自动失效
+    return "$method|$url|$bodyContent|$cacheSalt".toMd5()
 }

@@ -14,6 +14,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.zhhz.spider.remote.AndroidRuleEditorServer
+import com.zhhz.spider.remote.RuleEditorPairing
 import fi.iki.elonen.NanoHTTPD
 import org.koin.compose.koinInject
 import java.net.Inet4Address
@@ -99,6 +100,8 @@ actual fun rememberBookExportDirectoryAction(
 actual fun AndroidRuleEditorServerEffect() {
     val server = koinInject<AndroidRuleEditorServer>()
     DisposableEffect(server) {
+        // 每次启动服务前轮换配对令牌：上一会话泄露的令牌不再有效
+        RuleEditorPairing.rotate()
         runCatching { server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
             .onFailure { it.printStackTrace() }
         onDispose { server.stop() }

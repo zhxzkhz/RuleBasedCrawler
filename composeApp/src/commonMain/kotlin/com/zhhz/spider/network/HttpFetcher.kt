@@ -10,6 +10,8 @@ import java.nio.charset.Charset
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.LockSupport
+import java.util.concurrent.locks.ReentrantLock
 
 private val logger = KotlinLogging.logger {} // 声明类级日志对象
 
@@ -22,7 +24,7 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
     private val cookieStore = ConcurrentHashMap<String, List<Cookie>>()
     private val clientRegistry = ConcurrentHashMap<String, OkHttpClient>()
     private val configFingerprint = ConcurrentHashMap<String, Int>() // 存储配置的哈希指纹
-    private val lastRequestMap = ConcurrentHashMap<String, Long>()
+    private val rateLimiter = SourceRateLimiter()
 
     private val myCookieJar = object : CookieJar {
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
@@ -53,14 +55,14 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
     }
 
     fun fetch(sourceId: String, rate: Long, req: FetchRequest): String {
-        // 1. 限流
-        applyRateLimit(sourceId, rate)
+        // 1. 限流（按源串行，见 SourceRateLimiter）
+        rateLimiter.acquire(sourceId, rate)
 
         // 2. 获取或创建 Client (包含 Proxy 和 DNS 检测)
         val client = getOrCreateClient(sourceId, req.proxy, req.customDns)
 
         // 3. 构建请求并打标 (TagAction 逻辑)
-        val tagAction = TagAction(req.isCache)
+        val tagAction = TagAction(req.isCache, req.cacheSalt)
         val okReq = Request.Builder().url(req.url).tag(TagAction::class.java, tagAction).apply {
             req.headers.forEach { (k, v) -> header(k, v) }
             if (req.method == "POST") {
@@ -119,14 +121,36 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
 
         return newClient
     }
+}
 
-    private fun applyRateLimit(id: String, delay: Long) {
-        val wait = (lastRequestMap[id] ?: 0) + delay - System.currentTimeMillis()
-        if (wait > 0) {
-            // 使用可中断等待而非 Thread.sleep，避免阻塞协程调度器线程
-            java.util.concurrent.locks.LockSupport.parkNanos(wait * 1_000_000)
+/**
+ * 按书源串行化的请求限流器：concurrentRate 的语义是"同一书源两次请求的最小间隔"。
+ *
+ * 旧实现先读 lastRequestMap[id] 再写、中间无原子性，并发线程会读到同一个旧时间戳、
+ * 计算出相同等待并同时放行（漫画下载 imageSlots 默认 6 并发时可同源 6 连发）。
+ * 这里在每个源自己的锁内完成"计算最早可发时刻 → 等待 → 登记"，
+ * 后来的请求在锁上排队并基于前一个的完成时刻重新计算间隔；
+ * park 循环抵御虚假唤醒。不同书源使用不同的锁，互不阻塞。
+ */
+internal class SourceRateLimiter {
+    private val lastRequestMap = ConcurrentHashMap<String, Long>()
+    private val locks = ConcurrentHashMap<String, ReentrantLock>()
+
+    fun acquire(id: String, delayMs: Long) {
+        if (delayMs <= 0) return
+        val lock = locks.computeIfAbsent(id) { ReentrantLock() }
+        lock.lock()
+        try {
+            val earliest = (lastRequestMap[id] ?: 0L) + delayMs
+            var remaining = earliest - System.currentTimeMillis()
+            while (remaining > 0) {
+                LockSupport.parkNanos(remaining * 1_000_000)
+                remaining = earliest - System.currentTimeMillis()
+            }
+            lastRequestMap[id] = System.currentTimeMillis()
+        } finally {
+            lock.unlock()
         }
-        lastRequestMap[id] = System.currentTimeMillis()
     }
 }
 
@@ -143,5 +167,6 @@ data class FetchRequest(
     val body: String? = null,           // POST 负载
     val isJson: Boolean = false,        // 是否为 JSON 提交
     val proxy: Proxy? = null,           // 代理服务器
-    val customDns: String? = null       // DNS 配置字段
+    val customDns: String? = null,      // DNS 配置字段
+    val cacheSalt: String = ""          // 快照缓存盐（规则指纹）：规则变更后旧快照自动失效
 )

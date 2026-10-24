@@ -15,6 +15,7 @@ import com.zhhz.spider.repository.ReaderRepository
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.impl.decodeCachedNovelChapter
 import com.zhhz.spider.rule.SourceRule
+import com.zhhz.spider.ui.widget.mangaImageDiskCacheKey
 import com.zhhz.spider.viewModel.ChapterBlock
 import com.zhhz.spider.viewModel.MangaImage
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -210,7 +211,7 @@ actual class BookPackager(
         val diskCache = imageLoader.diskCache ?: return null
         val isDecryptImage = rule.content.decryptImage.isNotEmpty()
 
-        var snapshot = diskCache.openSnapshot(mangaImage.url)
+        var snapshot = diskCache.openSnapshot(mangaImageDiskCacheKey(rule.id, mangaImage.url))
 
         if (snapshot == null) {
             try {
@@ -229,7 +230,7 @@ actual class BookPackager(
                     // 执行到这里说明 result is SuccessResult
                 }
                 // 💡 重试管线安全结束（代表某一次重试成功了！），立刻去打开它的物理快照！
-                snapshot = diskCache.openSnapshot(mangaImage.url)
+                snapshot = diskCache.openSnapshot(mangaImageDiskCacheKey(rule.id, mangaImage.url))
 
             } catch (e: CancellationException) {
                 throw e

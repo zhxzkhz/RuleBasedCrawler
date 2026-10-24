@@ -65,7 +65,7 @@ object RuleDebugRunner {
         return try {
             currentTab = 2
             onUpdate(DebugPageUpdate(currentTab, ">>> 正在搜索: $input ..."))
-            val searchHtml = fetchOnIo { taskRunner.fetch(rule, rule.search, input, ctx) }
+            val searchHtml = fetchOnIo { taskRunner.fetch(rule, rule.search, input, ctx, bypassSnapshotCache = true) }
             val searchList = rule.search.getList(searchHtml, ctx)
             if (searchList.isEmpty()) {
                 val localResult = runLocal(currentTab, searchHtml, rule, ctx)
@@ -91,7 +91,7 @@ object RuleDebugRunner {
             currentTab = 3
             ctx["bookUrl"] = firstBookUrl
             onUpdate(DebugPageUpdate(currentTab, ">>> 正在抓取详情: $firstBookUrl ..."))
-            val detailHtml = fetchOnIo { taskRunner.fetch(rule, rule.detail, firstBookUrl, ctx) }
+            val detailHtml = fetchOnIo { taskRunner.fetch(rule, rule.detail, firstBookUrl, ctx, bypassSnapshotCache = true) }
             val detailLocalResult = runLocal(currentTab, detailHtml, rule, ctx)
             onUpdate(DebugPageUpdate(currentTab, ">>> 正在抓取详情: $firstBookUrl ...\n${detailLocalResult.output}", detailHtml, detailLocalResult))
 
@@ -107,7 +107,7 @@ object RuleDebugRunner {
                 detailHtml
             } else {
                 onUpdate(DebugPageUpdate(currentTab, ">>> 正在抓取目录: $catalogUrl ..."))
-                fetchOnIo { taskRunner.fetch(rule, rule.catalog, catalogUrl, ctx) }
+                fetchOnIo { taskRunner.fetch(rule, rule.catalog, catalogUrl, ctx, bypassSnapshotCache = true) }
             }
 
             val toc = rule.catalog.getChapters(tocHtml, ctx)
@@ -123,7 +123,7 @@ object RuleDebugRunner {
 
             currentTab = 5
             onUpdate(DebugPageUpdate(currentTab, ">>> 正文获取中: $contentUrl ..."))
-            val contentHtml = fetchOnIo { taskRunner.fetch(rule, rule.content, contentUrl, ctx) }
+            val contentHtml = fetchOnIo { taskRunner.fetch(rule, rule.content, contentUrl, ctx, bypassSnapshotCache = true) }
             val contentLocalResult = runLocal(currentTab, contentHtml, rule, ctx)
             onUpdate(DebugPageUpdate(currentTab, contentLocalResult.output, contentHtml, contentLocalResult))
 
@@ -146,11 +146,11 @@ object RuleDebugRunner {
         taskRunner: FetchTaskRunner
     ): NetworkDebugResult {
         val html = when (tabIndex) {
-            1 -> taskRunner.fetchWithSession(rule, rule.login, input, ctx)
-            2 -> taskRunner.fetch(rule, rule.search, input, ctx)
-            3 -> taskRunner.fetch(rule, rule.detail, input, ctx)
-            4 -> taskRunner.fetch(rule, rule.catalog, input, ctx)
-            5 -> taskRunner.fetch(rule, rule.content, input, ctx)
+            1 -> taskRunner.fetchWithSession(rule, rule.login, input, ctx, bypassSnapshotCache = true)
+            2 -> taskRunner.fetch(rule, rule.search, input, ctx, bypassSnapshotCache = true)
+            3 -> taskRunner.fetch(rule, rule.detail, input, ctx, bypassSnapshotCache = true)
+            4 -> taskRunner.fetch(rule, rule.catalog, input, ctx, bypassSnapshotCache = true)
+            5 -> taskRunner.fetch(rule, rule.content, input, ctx, bypassSnapshotCache = true)
             // 💡 发现页调试：
             // ① 输入框填了地址 → 直接抓该地址（测试某个具体分类的列表页）
             // ② 输入为空 → 先执行静态分类生成；失败则直接报出脚本错误，不再误抓首页
@@ -158,7 +158,7 @@ object RuleDebugRunner {
             // ④ 都没有 → 回退入口页（urlSelector 模板或书源主页）
             6 -> {
                 if (input.isNotBlank()) {
-                    taskRunner.fetch(rule, rule.explore, input, ctx)
+                    taskRunner.fetch(rule, rule.explore, input, ctx, bypassSnapshotCache = true)
                 } else {
                     val staticTabs = ExploreTabResolver.resolveStatic(rule, ctx)
                     if (staticTabs.isEmpty() &&
@@ -174,7 +174,7 @@ object RuleDebugRunner {
                     }
                     val entryUrl = staticTabs.firstOrNull()?.url
                         ?: rule.explore.getExploreUrl(rule.url, ctx).ifBlank { rule.url }
-                    taskRunner.fetch(rule, rule.explore, entryUrl, ctx)
+                    taskRunner.fetch(rule, rule.explore, entryUrl, ctx, bypassSnapshotCache = true)
                 }
             }
             // 💡 评论页：输入为空时用书籍详情 URL 生成评论地址（{{key}} 模板）
@@ -184,7 +184,7 @@ object RuleDebugRunner {
                 } else {
                     rule.comment.getCommentUrl(ctx["bookUrl"] ?: rule.url, ctx)
                 }
-                taskRunner.fetch(rule, rule.comment, commentUrl, ctx)
+                taskRunner.fetch(rule, rule.comment, commentUrl, ctx, bypassSnapshotCache = true)
             }
             else -> ""
         }

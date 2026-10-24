@@ -1,5 +1,6 @@
 package com.zhhz.spider.repository.impl
 
+import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.ChapterDao
 import com.zhhz.spider.db.ChapterEntity
 import com.zhhz.spider.db.toDomain
@@ -16,13 +17,19 @@ import kotlinx.coroutines.withContext
 
 class CatalogRepositoryImpl(
     private val chapterDao: ChapterDao,
+    private val bookDao: BookDao,
     private val ruleRepository: RuleRepository,
     private val fetchTaskRunner: FetchTaskRunner, // 注入网络执行器
     private val sessionRepository: SessionRepository,
     private val contextSessionManager: ContextSessionManager
 ) : CatalogRepository {
 
-    override suspend fun fetchData(catalogUrl: String, ruleId: String, bookUrl: String?): List<Chapter> {
+    override suspend fun fetchData(
+        catalogUrl: String,
+        ruleId: String,
+        bookUrl: String?,
+        bypassSnapshotCache: Boolean
+    ): List<Chapter> {
         return withContext(Dispatchers.IO) {
             // 1. 0 毫秒极速从内存缓存中捞出已启用的规则
             val rule = ruleRepository.getEnabledRules().find { it.id == ruleId }
@@ -32,7 +39,7 @@ class CatalogRepositoryImpl(
             val ctx = contextSessionManager.getContext(targetBookUrl,ruleId)
 
             // 2. 搬运原本 RuleApi 的网络抓取逻辑：获取目录页面的 HTML 源码
-            val html = fetchTaskRunner.fetch(rule, rule.catalog, catalogUrl, ctx,ctx["bookDetailHtml"])
+            val html = fetchTaskRunner.fetch(rule, rule.catalog, catalogUrl, ctx, ctx["bookDetailHtml"], bypassSnapshotCache = bypassSnapshotCache)
             html.throwIfCrawlerError(rule, CrawlerStage.CATALOG)
 
             // 3. 调用爬虫规则引擎：从 HTML 中提取出原始章节列表
@@ -67,6 +74,11 @@ class CatalogRepositoryImpl(
 
     override suspend fun saveData(bookUrl: String, chapters: List<Chapter>) {
         withContext(Dispatchers.IO) {
+            // 无论走哪个同步分支，目录总数都以网络结果为准，
+            // 书架"未读 N 章"红点依赖 totalChapters
+            runCatching { bookDao.updateTotalChapters(bookUrl, chapters.size) }
+                .onFailure { println("更新 totalChapters 失败: ${it.message}") }
+
             val localChapters = chapterDao.getChaptersByBookUrl(bookUrl)
             val localCount = localChapters.size
             val fetchedCount = chapters.size

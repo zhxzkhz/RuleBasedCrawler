@@ -371,6 +371,10 @@ private class FakeBookshelfDb(
                 storedBooks[url]?.let { storedBooks[url] = it.copy(inLibrary = inLibrary) }
             }
         }
+
+        override suspend fun updateTotalChapters(bookUrl: String, totalChapters: Int) {
+            storedBooks[bookUrl]?.let { storedBooks[bookUrl] = it.copy(totalChapters = totalChapters) }
+        }
     }
 
     val storedGroups = mutableListOf<BookGroupEntity>()

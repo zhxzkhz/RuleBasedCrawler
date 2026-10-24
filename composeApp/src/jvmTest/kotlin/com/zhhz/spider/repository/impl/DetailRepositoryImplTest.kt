@@ -242,4 +242,6 @@ private class FakeBookDao(
     override suspend fun clearGroupFromAllBooks(mask: Long) = Unit
 
     override suspend fun setInLibrary(urls: List<String>, inLibrary: Boolean) = Unit
+
+    override suspend fun updateTotalChapters(bookUrl: String, totalChapters: Int) = Unit
 }

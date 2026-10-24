@@ -239,6 +239,15 @@ class ReaderViewModel(
                 var activeBook = localBook ?: matchingSessionBook ?: Book(
                         title = "未知书籍", author = "", cover = "", url = bookUrl, ruleId = ruleId
                     )
+                // 本地实体不含 availableSources。仅当 Session 里的书源列表确实覆盖当前
+                // 正在打开的这本书（含当前 ruleId+url）时才继承，防止把别的书的源带进来；
+                // 换源的完整列表跟着 Session 走，读完返回详情仍可继续换源
+                if (activeBook.availableSources.isEmpty()) {
+                    sessionBook?.availableSources
+                        ?.takeIf { sources -> sources.any { it.ruleId == ruleId && it.url == bookUrl } }
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { sources -> activeBook = activeBook.copy(availableSources = sources) }
+                }
                 if (matchingSessionBook == null || localBook != null) {
                     sessionRepository.saveData(activeBook)
                 }
@@ -281,7 +290,8 @@ class ReaderViewModel(
                 }
 
                 if (catalogList.isEmpty()) {
-                    catalogList = catalogRepository.fetchData(bookUrl, ruleId, bookUrl)
+                    // 本地无目录时的兜底抓取绕过快照：打开书应看到最新章节列表
+                    catalogList = catalogRepository.fetchData(bookUrl, ruleId, bookUrl, bypassSnapshotCache = true)
                     sessionRepository.saveCatalog(catalogList)
                     if (isBookInLibrary) {
                         catalogRepository.saveData(bookUrl, catalogList)
@@ -449,7 +459,8 @@ class ReaderViewModel(
                 chapterJobs.remove(url)?.cancel()
 
                 val block = withContext(Dispatchers.IO) {
-                    readerRepository.fetchData(url, state.ruleId, state.bookUrl)
+                    // forceRefresh：章节正文缓存只要存在就直接返回，必须显式作废才能重新抓取
+                    readerRepository.fetchData(url, state.ruleId, state.bookUrl, forceRefresh = true)
                 }
 
                 val isMangaMode = state.bookType == BookType.image

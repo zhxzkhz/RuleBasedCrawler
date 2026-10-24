@@ -98,10 +98,22 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
         AndroidRuleEditorServerEffect()
 
         val diskCache = remember {
+            // 图片磁盘缓存键升级为 v2 复合键（mangaImageDiskCacheKey）后，历史裸 URL
+            // 条目永不再命中：在 Coil 打开目录前按版本标记一次性回收，避免死数据长期
+            // 占用磁盘配额。标记放在缓存目录的父目录（放里面会被本次清理删掉）。
+            val imageCachePath: Path = get(Path::class.java, named("imageCacheDir"))
+            val imageCacheDirFile = File(imageCachePath.toString())
+            val versionMarker = imageCacheDirFile.parentFile?.let { File(it, ".image-cache-v2") }
+            if (versionMarker != null && !versionMarker.exists()) {
+                runCatching {
+                    imageCacheDirFile.listFiles()?.forEach { it.deleteRecursively() }
+                    versionMarker.createNewFile()
+                }
+            }
             DiskCache.Builder()
                 .fileSystem(FileSystem.SYSTEM)
                 .maxSizeBytes(10 * 1024 * 1024 * 1024L) // 10GB
-                .directory(get(Path::class.java, named("imageCacheDir"))) // 💡 设进这里
+                .directory(imageCachePath) // 💡 设进这里
                 .build()
         }
 

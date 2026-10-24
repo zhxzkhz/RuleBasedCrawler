@@ -49,7 +49,12 @@ class ReaderRepositoryImpl(
     }
 
     // 💡 1. 统一命名：通过 fetchData 加载章节内容
-    override suspend fun fetchData(chapterUrl: String, ruleId: String, bookUrl: String?): ChapterBlock {
+    override suspend fun fetchData(
+        chapterUrl: String,
+        ruleId: String,
+        bookUrl: String?,
+        forceRefresh: Boolean
+    ): ChapterBlock {
         return withContext(Dispatchers.IO) {
 
             val rule = ruleRepository.getEnabledRules().find { it.id == ruleId }
@@ -61,6 +66,11 @@ class ReaderRepositoryImpl(
 
             val safeFileName = chapterCacheFileName(ruleId, targetBookUrl, chapterUrl)
             val cacheFile  = textCacheDirectory / safeFileName
+
+            if (forceRefresh && fileSystem.exists(cacheFile)) {
+                // "重新获取"：旧缓存（含被反爬页污染的内容）直接作废，走网络重抓
+                runCatching { fileSystem.delete(cacheFile) }
+            }
 
             // 统一离线判定：只要磁盘上有这个文件，说明百分之百缓存成功了！
             if (fileSystem.exists(cacheFile)) {
@@ -87,7 +97,8 @@ class ReaderRepositoryImpl(
 
             val isBookInLibrary = bookDao.getBookByUrl(targetBookUrl) != null
 
-            val data = fetchTaskRunner.fetch(rule, rule.content,chapterUrl , ctx)
+            // forceRefresh 时连网页快照一并绕过：否则正文文件删了，快照又返回同一份旧 HTML
+            val data = fetchTaskRunner.fetch(rule, rule.content, chapterUrl, ctx, bypassSnapshotCache = forceRefresh)
             data.throwIfCrawlerError(rule, CrawlerStage.CONTENT)
 
 

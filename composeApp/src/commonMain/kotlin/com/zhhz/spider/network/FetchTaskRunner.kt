@@ -108,7 +108,13 @@ class FetchTaskRunner(
         }
     }
 
-    suspend fun fetchWithSession(source : SourceRule, page: IPage, input: String, ctx: VariableContext): String {
+    suspend fun fetchWithSession(
+        source : SourceRule,
+        page: IPage,
+        input: String,
+        ctx: VariableContext,
+        bypassSnapshotCache: Boolean = false
+    ): String {
         // 1. 从数据库读取持久化的会话
         val session = dao.getSession(source.id)
 
@@ -121,7 +127,7 @@ class FetchTaskRunner(
         if (session == null || isExpired) {
             // 3. 如果没登录或已过期，触发自动化登录逻辑
             logger.info { "凭证缺失或过期，尝试重新登录..." }
-            val response = performLogin(source, ctx) // 这里的逻辑见前一条回复
+            val response = performLogin(source, ctx, bypassSnapshotCache) // 这里的逻辑见前一条回复
             if (response.first.isNotBlank()) {
                 ctx["token"] = response.first
             }
@@ -139,7 +145,14 @@ class FetchTaskRunner(
      * @param input 关键变量：搜索页为“关键字”，其他页为“目标 URL”
      * @param ctx 变量上下文
      */
-    suspend fun fetch(source: SourceRule, page: IPage, input: String, ctx: VariableContext , cacheHtml: String? = null): String {
+    suspend fun fetch(
+        source: SourceRule,
+        page: IPage,
+        input: String,
+        ctx: VariableContext ,
+        cacheHtml: String? = null,
+        bypassSnapshotCache: Boolean = false
+    ): String {
 
         if (page.urlSelector.steps.isEmpty() && cacheHtml != null && input.isBlank()) {
             logger.info { "检测到无 URL 规则且存在缓存 HTML，直接透传" }
@@ -162,7 +175,7 @@ class FetchTaskRunner(
                     // 4. 数据库也没有，说明从未登录或已被清除
                     // 这里可以报错提示用户，或者自动尝试执行一次 performLogin
                     logger.info { "凭证缺失或过期，尝试重新登录 source=${source.name.ifBlank { source.id }} id=${source.id}" }
-                    val newToken = performLogin(source, ctx) // 这里的逻辑见前一条回复
+                    val newToken = performLogin(source, ctx, bypassSnapshotCache) // 这里的逻辑见前一条回复
                     if (newToken.first.isBlank()){
                         logger.error { "登录失败，未获取到 token source=${source.name.ifBlank { source.id }} id=${source.id}" }
                         return "ERROR: REQUIRE_LOGIN"
@@ -218,12 +231,14 @@ class FetchTaskRunner(
             keyword = input,
             method = method.uppercase(),
             charset = charset,
-            isCache = source.useCache,
+            isCache = source.useCache && !bypassSnapshotCache,
             headers = finalHeaders,
             body = finalBody,
             isJson = isJson,
             proxy = null,
-            customDns = source.customDns
+            customDns = source.customDns,
+            // 规则指纹作为快照缓存盐：保存规则（updateTime 变化）后旧快照自动失效
+            cacheSalt = "${source.id}|${source.updatedAt}"
         )
         bindings["java_request"] = preRequest
 
@@ -297,14 +312,18 @@ class FetchTaskRunner(
         return rawResponse
     }
 
-    suspend fun performLogin(source: SourceRule, ctx: VariableContext): Pair<String, String> {
+    suspend fun performLogin(
+        source: SourceRule,
+        ctx: VariableContext,
+        bypassSnapshotCache: Boolean = false
+    ): Pair<String, String> {
         val page = source.login
         if (page.urlSelector.steps.isEmpty() && page.config.bodyPayload.isNullOrBlank()) {
             return "" to ""// 未配置登录则跳过
         }
 
         // 1. 直接复用现有的 fetch 逻辑获取响应 (input 此时可以是空的，或者传入账号)
-        val response = fetch(source, page, "", ctx)
+        val response = fetch(source, page, "", ctx, bypassSnapshotCache = bypassSnapshotCache)
 
         // 2. 提取 Token
         val token = RuleParser.parseString(response, page.tokenSelector, ctx)

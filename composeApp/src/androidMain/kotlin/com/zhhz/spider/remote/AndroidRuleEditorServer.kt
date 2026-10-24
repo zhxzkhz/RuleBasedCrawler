@@ -34,7 +34,20 @@ class AndroidRuleEditorServer(
 ) : NanoHTTPD("0.0.0.0", RULE_EDITOR_SERVER_PORT) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    private fun isAuthorized(session: IHTTPSession): Boolean {
+        val token = session.headers[RuleEditorPairing.TOKEN_HEADER]
+        return token != null && token == RuleEditorPairing.token
+    }
+
     override fun serve(session: IHTTPSession): Response = try {
+        // /health 仅返回服务名与版本用于发现；其余端点（含读规则）全部校验配对令牌。
+        // 令牌不通过网络下发，只能从 Android 屏幕上读取后手动输入，防止同网段他人接入。
+        if (session.uri != "/health" && !isAuthorized(session)) {
+            return jsonResponse(
+                RemoteErrorResponse("未授权：请输入 Android 端规则 IDE 左下角显示的配对令牌"),
+                Response.Status.UNAUTHORIZED
+            )
+        }
         if (session.uri != "/logs") {
             DebugLogBuffer.append("规则服务请求: ${session.method} ${session.uri}")
         }

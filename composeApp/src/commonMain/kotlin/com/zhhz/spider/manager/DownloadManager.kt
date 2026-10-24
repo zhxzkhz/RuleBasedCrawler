@@ -9,6 +9,7 @@ import com.zhhz.spider.model.DownloadStatus
 import com.zhhz.spider.model.DownloadTask
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.ReaderRepository
+import com.zhhz.spider.ui.widget.mangaImageDiskCacheKey
 import com.zhhz.spider.viewModel.MangaImage
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
@@ -142,8 +143,9 @@ class DownloadManager(
                     ctx["bookUrl"] = bookUrl
 
                     // A. 获取最新目录 (默认走双层保底：内存 -> 本地 -> 网络)
+                    // 本地无目录时的兜底抓取绕过快照：下载应基于最新目录，避免漏掉新章节
                     val catalog = catalogRepository.loadData(bookUrl).ifEmpty {
-                        catalogRepository.fetchData(bookUrl, ruleId, bookUrl)
+                        catalogRepository.fetchData(bookUrl, ruleId, bookUrl, bypassSnapshotCache = true)
                     }
 
                     // 💡 选章过滤：保持目录顺序，只下载所选 URL；selectedUrls=null 表示全本
@@ -282,10 +284,13 @@ fun imageRequest(
     isImageDecrypt: Boolean = false,
     context: PlatformContext
 ): ImageRequest {
+    // 磁盘缓存存的是"按书源处理后的成品"，键必须带 ruleId（含解密配置），
+    // 否则换源/镜像站对同一 URL 互相冒领对方的成品图
+    val cacheKey = mangaImageDiskCacheKey(ruleId, image.url)
     val builder = ImageRequest.Builder(context)
         .data(image.url)
-        .memoryCacheKey(image.url)
-        .diskCacheKey(image.url)
+        .memoryCacheKey(cacheKey)
+        .diskCacheKey(cacheKey)
 
     val headers = NetworkHeaders.Builder().set("X-Internal-Rule-Id", ruleId)
         .set("X-Internal-Book-Url", bookUrl)

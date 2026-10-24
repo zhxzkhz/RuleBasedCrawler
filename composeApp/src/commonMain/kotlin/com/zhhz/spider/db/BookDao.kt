@@ -85,6 +85,10 @@ interface BookDao {
     @Query("UPDATE books SET inLibrary = :inLibrary WHERE detailUrl IN (:urls)")
     suspend fun setInLibrary(urls: List<String>, inLibrary: Boolean)
 
+    /** 目录变化后更新总章节数（书架"未读 N 章"红点的数据源） */
+    @Query("UPDATE books SET totalChapters = :totalChapters WHERE detailUrl = :bookUrl")
+    suspend fun updateTotalChapters(bookUrl: String, totalChapters: Int)
+
     // 1. 第一步：尝试插入。如果冲突（URL已存在），则什么都不做
     // 这样可以保护数据库中已有的 isRead 状态不被覆盖
     @Insert(onConflict = OnConflictStrategy.IGNORE)

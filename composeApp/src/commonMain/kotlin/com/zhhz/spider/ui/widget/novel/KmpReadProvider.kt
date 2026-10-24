@@ -30,8 +30,11 @@ class KmpReadProvider(
         constraints: Constraints,
         config: ReadBookConfig
     ): List<TextPage> {
+        // 同一章且排版参数/尺寸未变时直接复用上次分页结果，跳过昂贵的测宽与重排
+        val cacheKey = novelPageCacheKey(text, constraints.maxWidth, constraints.maxHeight, config)
+        NovelPageCache.get(cacheKey)?.let { return it }
+
         return withContext(Dispatchers.Default) {
-            val time = System.currentTimeMillis()
             val maxWidth = (constraints.maxWidth - config.margin * 2 * density.density).toInt()
             
             // 将所有 px 配置基于 density 转换
@@ -72,8 +75,9 @@ class KmpReadProvider(
                 }
             }
 
-            println("测量耗时 》》》》 ms  行数: ")
-            generateAllTextPage(lines, constraints, config, textHeight, marginPx, lineSpacingPx, paragraphSpacingPx)
+            val pages = generateAllTextPage(lines, constraints, config, textHeight, marginPx, lineSpacingPx, paragraphSpacingPx)
+            NovelPageCache.put(cacheKey, pages)
+            pages
         }
     }
 

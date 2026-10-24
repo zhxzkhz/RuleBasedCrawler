@@ -18,6 +18,7 @@ import kotlinx.coroutines.CancellationException
 import okio.Buffer
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import java.util.concurrent.ConcurrentHashMap
 import javax.script.SimpleBindings
 
 private val logger = KotlinLogging.logger {}
@@ -32,9 +33,14 @@ class DecryptingFetcher(
 ) : Fetcher, KoinComponent {
 
     companion object {
-        // 💡 1. 核心：定义一个全局唯一的静态锁（JVM 级）
-        // 用于绝对保护非线程安全的 SCRIPT_ENGINE 和 AWT 拼图过程
-        private val jvmDecryptLock = Any()
+        /**
+         * 按书源 ruleId 细化的解密锁。
+         * 真正需要串行的共享状态只有 JS 引擎，而 JsEngineRunner 已按 lockKey（=ruleId，
+         * 经 bindings.__lockKey 传入）分配独立引擎与锁；解码/拼图/编码每调用使用独立的
+         * Bitmap 实例（Skia Image / BitmapFactory 均无跨线程共享）。
+         * 旧实现的 JVM 全局锁会让多本书并行下载时所有书源的解密排队在同一把锁上。
+         */
+        private val decryptLocks = ConcurrentHashMap<String, Any>()
     }
 
     private val ruleRepository: RuleRepository by inject()
@@ -74,7 +80,8 @@ class DecryptingFetcher(
             // allocation spikes and GC pauses. Network downloads can remain concurrent, but only
             // one page holds the source and output bitmaps during this CPU-heavy stage.
             val ctx = contextSessionManager.getContext(bookUrl, ruleId)
-            val cleanBytes = synchronized(jvmDecryptLock) {
+            // 同一书源串行（与 JsEngineRunner 的按源引擎锁语义一致），不同书源并行
+            val cleanBytes = synchronized(decryptLocks.computeIfAbsent(ruleId) { Any() }) {
                 val bitmap = scrambledBytes.toCoilBitmap()
                 val bindings = SimpleBindings()
                 bindings.put("java", JsExtensionClass)

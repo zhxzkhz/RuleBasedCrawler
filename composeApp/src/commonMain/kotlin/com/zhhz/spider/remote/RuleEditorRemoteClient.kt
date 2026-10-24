@@ -9,7 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-class RuleEditorRemoteClient(address: String) {
+class RuleEditorRemoteClient(address: String, private val token: String = "") {
     val baseUrl = address.trim().trimEnd('/').let {
         if (it.startsWith("http://") || it.startsWith("https://")) it else "http://$it"
     }
@@ -30,6 +30,7 @@ class RuleEditorRemoteClient(address: String) {
     suspend fun loadImage(request: RemoteImageRequest): ByteArray = withContext(Dispatchers.IO) {
         val httpRequest = Request.Builder()
             .url(baseUrl + "/debug/image")
+            .header("X-Editor-Token", token)
             .post(json.encodeToString(request).toRequestBody(mediaType))
             .build()
         client.newCall(httpRequest).execute().use { response ->
@@ -40,12 +41,13 @@ class RuleEditorRemoteClient(address: String) {
     }
 
     private suspend inline fun <reified T> get(path: String): T = execute(
-        Request.Builder().url(baseUrl + path).get().build()
+        Request.Builder().url(baseUrl + path).header("X-Editor-Token", token).get().build()
     )
 
     private suspend inline fun <reified I, reified O> post(path: String, value: I): O = execute(
         Request.Builder()
             .url(baseUrl + path)
+            .header("X-Editor-Token", token)
             .post(json.encodeToString(value).toRequestBody(mediaType))
             .build()
     )

@@ -6,8 +6,8 @@ import kotlinx.coroutines.flow.Flow
 
 
 interface DetailRepository {
-    // 强制命名：从网络获取详情数据
-    suspend fun fetchData(detailUrl: String, ruleId: String): BookDetail
+    // 强制命名：从网络获取详情数据；bypassSnapshotCache=true 时绕过网页快照（追更/手动刷新）
+    suspend fun fetchData(detailUrl: String, ruleId: String, bypassSnapshotCache: Boolean = false): BookDetail
 
     // 从本地数据库读取已保存的详情信息（不发网络请求），未保存过返回 null
     suspend fun loadLocalDetail(bookUrl: String): BookDetail?

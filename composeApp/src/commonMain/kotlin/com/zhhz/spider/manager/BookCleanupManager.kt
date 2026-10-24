@@ -5,6 +5,7 @@ import coil3.SingletonImageLoader
 import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.ChapterDao
 import com.zhhz.spider.repository.impl.decodeCachedNovelChapter
+import com.zhhz.spider.ui.widget.mangaImageDiskCacheKey
 import com.zhhz.spider.viewModel.MangaImage
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +77,8 @@ class BookCleanupManager(
                         else -> emptyList()
                     }
                     images.forEach { img ->
-                        val removed = diskCache?.remove(img.url)
+                        // 键与写入侧（imageRequest）保持一致：v2|ruleId|url
+                        val removed = diskCache?.remove(mangaImageDiskCacheKey(ruleId, img.url))
                         if (removed == true) removedImages++
                     }
                 }.onFailure { logger.warn(it) { "解析章节缓存清单失败 chapter=${chapter.url}" } }

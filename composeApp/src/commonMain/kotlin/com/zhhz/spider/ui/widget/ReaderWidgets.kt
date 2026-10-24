@@ -343,7 +343,8 @@ fun MangaReaderView(
                 )
             }
             imageLoader.memoryCache?.remove(MemoryCache.Key(image.url))
-            imageLoader.diskCache?.remove(image.url)
+            // 磁盘键与写入侧（imageRequest）一致：v2|ruleId|url
+            imageLoader.diskCache?.remove(mangaImageDiskCacheKey(ruleId, image.url))
         }
         appliedReloadVersion = uiState.imageReloadVersion
     }
