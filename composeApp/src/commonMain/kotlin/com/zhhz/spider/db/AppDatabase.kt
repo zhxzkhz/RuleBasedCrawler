@@ -9,7 +9,9 @@ import androidx.sqlite.execSQL
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, RuleEntity::class, SessionEntity::class, BookGroupEntity::class, SettingsEntity::class],
     version = 12,
-    exportSchema = false
+    // 导出 schema：提交到 VCS 后，未来版本可做 diff 校验 / 自动生成迁移 / MigrationTestHelper 测试。
+    // 历史教训：MIGRATION_3_4 曾与实体定义不符（列名/主键三处不一致），有 schema 即可在编译期发现
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun ruleDao(): RuleDao
