@@ -1,6 +1,5 @@
 package com.zhhz.spider.rule
 
-//import com.sun.script.javascript.RhinoScriptEngineFactory
 import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.JSONPath
 import com.zhhz.spider.util.JsExtensionClass

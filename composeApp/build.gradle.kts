@@ -35,6 +35,12 @@ kotlin {
                     excludeCategories("com.zhhz.spider.test.LiveNetworkTest")
                 }
             }
+            // gedoor 旧版引擎（Android 端 ENGINE）访问 JDK 内部类，测试里需要放开模块限制
+            // 才能在桌面 JVM 上复现 Android 的脚本行为（PicaHeaderScriptReproTest）
+            jvmArgs(
+                "--add-opens", "java.base/sun.security.action=ALL-UNNAMED",
+                "--add-opens", "java.base/sun.misc=ALL-UNNAMED"
+            )
         }
     }
 
@@ -44,6 +50,11 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation("com.github.tony19:logback-android:3.0.0")
             implementation("org.nanohttpd:nanohttpd:2.3.1")
+            // Android 平台没有 javax.script API（JSR-223），桌面由 JDK 提供。
+            // 此前该 API 一直由 gedoor rhino-android 传递的 jsr223-api 提供，
+            // 移除 gedoor 时被连带移除（运行时 Failed resolution of Ljavax/script/*）。
+            // 这里显式声明同一构件，供官方 rhino-engine 使用。
+            implementation("com.sun.phobos:jsr223-api:1.0")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -90,10 +101,13 @@ kotlin {
             implementation("com.squareup.okhttp3:logging-interceptor")
 
             // js运行库
+            // 官方 rhino-engine（Android/桌面共用）：gedoor 旧版已移除——
+            // 两个 jar 都带全套 org.mozilla.javascript 类，同包会版本冲突，
+            // 且旧引擎 WrapFactory 语义与桌面不一致（哔咔脚本 toLowerCase 报错根因）
             implementation(libs.rhino.engine)
-            //implementation("io.apisense:rhino-android:1.3.0")
-
-            implementation("com.github.gedoor:rhino-android:1.8")
+            // 核心类（NativeObject/ScriptableObject 等）此前由 gedoor jar 间接提供，
+            // 移除后必须显式依赖官方 rhino 本体
+            implementation("org.mozilla:rhino:1.9.1")
 
             //加解密类库
             implementation("cn.hutool:hutool-crypto:5.8.35")
@@ -117,6 +131,11 @@ kotlin {
             implementation(libs.kotlinx.coroutinesSwing)
             implementation("ch.qos.logback:logback-classic:1.4.14")
             implementation("org.fusesource.jansi:jansi:2.4.1")
+        }
+        jvmTest.dependencies {
+            // 仅测试使用：gedoor 旧版引擎（曾经的 Android ENGINE），
+            // PicaHeaderScriptReproTest 靠它复现/存档旧引擎的字符串包装差异
+            implementation("com.github.gedoor:rhino-android:1.8")
         }
     }
 }

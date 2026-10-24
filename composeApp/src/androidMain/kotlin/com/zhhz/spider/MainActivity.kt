@@ -4,11 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.koin.android.ext.koin.androidContext
-import java.lang.reflect.Field
-
-private val logger = KotlinLogging.logger {}
 
 
 class MainActivity : ComponentActivity() {
@@ -32,18 +28,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        try {
-            val clazz = Class.forName("com.sun.script.javascript.RhinoClassShutter")
-            val method = clazz.getDeclaredMethod("getInstance")
-            method.isAccessible = true
-            method.invoke(null)
-
-            val protectedClasses: Field = clazz.getDeclaredField("protectedClasses")
-            protectedClasses.isAccessible = true
-            (protectedClasses.get(null) as HashMap<*, *>).remove("java.lang.Class")
-        } catch (e: Exception) {
-            logger.warn(e) { "Rhino ClassShutter 初始化失败（非致命）" }
-        }
+        // 原"解除 RhinoClassShutter 对 java.lang.Class 限制"的反射 hack 已随
+        // 旧版 gedoor 引擎一并移除：现与桌面统一使用 rhino-engine，无 ClassShutter
 
         setContent {
             App(koinConfig = {

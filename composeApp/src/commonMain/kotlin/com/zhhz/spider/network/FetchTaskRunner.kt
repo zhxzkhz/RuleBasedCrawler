@@ -262,8 +262,23 @@ class FetchTaskRunner(
                     }
                 }
             } catch (e: Exception) {
+                // 打印出错行的脚本源码：Rhino 的行号从 1 开始（ScriptException.lineNumber）。
+                // 实测 Java 异常（如加密类）有时报在空行上，此时顺延取下一个非空行标注
+                val errorLine = (e as? javax.script.ScriptException)?.lineNumber?.takeIf { it > 0 }
+                val scriptLines = script.lines()
+                val failingSource = errorLine?.let { line ->
+                    val exact = scriptLines.getOrNull(line - 1)?.trim()
+                    when {
+                        !exact.isNullOrBlank() -> "第${line}行: $exact"
+                        else -> {
+                            val next = scriptLines.drop(line).firstOrNull { it.isNotBlank() }?.trim()
+                            if (next != null) "第${line}行(空行，顺延至下一非空行): $next" else "第${line}行"
+                        }
+                    }
+                }
                 logger.error(e) {
-                    "Header 脚本执行失败 source=${source.name.ifBlank { source.id }} id=${source.id} page=${page.pageName()} url=$finalUrl"
+                    "Header 脚本执行失败 source=${source.name.ifBlank { source.id }} id=${source.id} page=${page.pageName()} url=$finalUrl" +
+                        (failingSource?.let { " 出错行内容: $it" } ?: "")
                 }
             }
         }

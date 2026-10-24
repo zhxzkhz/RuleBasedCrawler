@@ -2,9 +2,6 @@ package com.zhhz.spider.util
 
 import cn.hutool.core.codec.Base64
 import cn.hutool.crypto.SecureUtil
-import cn.hutool.crypto.digest.HMac
-import cn.hutool.crypto.digest.HmacAlgorithm
-import cn.hutool.crypto.symmetric.SymmetricCrypto
 import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.TypeReference
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -411,20 +408,32 @@ object JsExtensionClass {
     ): ByteArray? {
 
         if (data.isEmpty() || key.isNullOrEmpty()) return null
+        val transformation = paddings ?: return null
 
         val keySpec = SecretKeySpec(key.toByteArray(), mode)
         var params: AlgorithmParameterSpec? = null
         if (!iv.isNullOrEmpty()) {
             params = IvParameterSpec(iv.toByteArray())
         }
-        val symmetricCrypto = if (params == null) SymmetricCrypto(paddings, keySpec) else SymmetricCrypto(paddings, keySpec, params)
-        return if (isEncrypt) symmetricCrypto.encrypt(data) else symmetricCrypto.decrypt(data)
+        // 直接使用标准 JCA 默认提供者链：hutool 会固定选择 Android 内置的
+        // "BC"（被系统裁剪、无 AES/DES 等算法），导致 NoSuchAlgorithmException；
+        // 不指定 Provider 时 Android 走 Conscrypt、桌面走 JDK 默认，两端一致
+        val cipher = javax.crypto.Cipher.getInstance(transformation)
+        val opMode = if (isEncrypt) javax.crypto.Cipher.ENCRYPT_MODE else javax.crypto.Cipher.DECRYPT_MODE
+        if (params == null) {
+            cipher.init(opMode, keySpec)
+        } else {
+            cipher.init(opMode, keySpec, params)
+        }
+        return cipher.doFinal(data)
     }
 
     fun hmacSHA256(key: String, data: String): ByteArray {
-        val hmac = HMac(HmacAlgorithm.HmacSHA256, SecretKeySpec(key.toByteArray(), "HmacSHA256"))
-        val result = hmac.digest(data.toByteArray()) as ByteArray
-        return result
+        // 同上：不指定 Provider。hutool 的 HMac 在 Android 上会命中被裁剪的
+        // 内置 BC（"no such algorithm: HmacSHA256 for provider BC"）
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key.toByteArray(), "HmacSHA256"))
+        return mac.doFinal(data.toByteArray())
     }
 
     fun hmacSHA256StoHex(key: String, data: String): String {
