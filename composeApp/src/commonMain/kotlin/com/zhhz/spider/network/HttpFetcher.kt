@@ -92,6 +92,9 @@ class HttpFetcher(private val snapshotInterceptor: FileSnapshotInterceptor) {
         return clientRegistry[sourceId]
     }
 
+    /** 规则保存后清空网页快照：旧指纹的快照已成孤儿且可再生（见 FileSnapshotInterceptor.clearCache） */
+    fun clearSnapshotCache() = snapshotInterceptor.clearCache()
+
     /**
      * 获取或创建带代理/DNS 配置的 Client。
      * 如果缓存中已有且配置未变，直接返回；否则按给定配置重建。

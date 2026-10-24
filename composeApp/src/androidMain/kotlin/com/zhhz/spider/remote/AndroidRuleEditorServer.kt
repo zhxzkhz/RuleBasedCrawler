@@ -5,6 +5,7 @@ import com.zhhz.spider.db.RuleEntity
 import com.zhhz.spider.debug.RuleDebugRunner
 import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.network.FetchTaskRunner
+import com.zhhz.spider.network.HttpFetcher
 import com.zhhz.spider.network.MangaCallFactory
 import com.zhhz.spider.repository.SessionRepository
 import com.zhhz.spider.repository.impl.decodeImageHeaders
@@ -30,7 +31,8 @@ class AndroidRuleEditorServer(
     private val taskRunner: FetchTaskRunner,
     private val contextSessionManager: ContextSessionManager,
     private val sessionRepository: SessionRepository,
-    private val mangaCallFactory: MangaCallFactory
+    private val mangaCallFactory: MangaCallFactory,
+    private val httpFetcher: HttpFetcher
 ) : NanoHTTPD("0.0.0.0", RULE_EDITOR_SERVER_PORT) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -64,6 +66,7 @@ class AndroidRuleEditorServer(
             Method.POST to "/rules/save" -> handlePost<RemoteRuleRequest, RemoteOperationResponse>(session) { request ->
                 val entity = request.rule.toEntity()
                 ruleDao.saveRule(entity)
+                httpFetcher.clearSnapshotCache()
                 DebugLogBuffer.append("规则已保存: ${entity.name.ifBlank { entity.id }}")
                 RemoteOperationResponse(true, "规则已保存")
             }

@@ -32,6 +32,19 @@ class FileSnapshotInterceptor(private val cacheDir: File) : Interceptor {
         }
     }
 
+    /**
+     * 清空全部网页快照（保留格式标记）。
+     * 规则保存后调用：快照键含规则指纹（updateTime），保存后旧键文件即成永久孤儿；
+     * 快照内容可再生，整体回收是成本最低的清理方式。
+     */
+    fun clearCache() {
+        runCatching {
+            cacheDir.listFiles()
+                ?.filterNot { it.name == FORMAT_MARKER }
+                ?.forEach { it.delete() }
+        }
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
         upgradeSnapshotFormatOnce()
         val request = chain.request()

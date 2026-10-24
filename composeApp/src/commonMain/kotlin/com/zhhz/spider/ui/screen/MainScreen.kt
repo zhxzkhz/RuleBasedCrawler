@@ -31,6 +31,7 @@ import com.zhhz.spider.debug.RuleDebugRunner
 import com.zhhz.spider.db.RuleDao
 import com.zhhz.spider.db.RuleEntity
 import com.zhhz.spider.manager.ContextSessionManager
+import com.zhhz.spider.network.HttpFetcher
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.repository.impl.decodeImageHeaders
 import com.zhhz.spider.repository.SessionRepository
@@ -109,6 +110,7 @@ fun MainScreen(
         var topInputText by remember { mutableStateOf("") }
 
         val dao = koinInject<RuleDao>()
+        val httpFetcher = koinInject<HttpFetcher>()
         val sessionRepository = koinInject<SessionRepository>()
         val contextSessionManager = koinInject<ContextSessionManager>()
         val scope = rememberCoroutineScope()
@@ -187,6 +189,7 @@ fun MainScreen(
                     if (client == null) {
                         val wasEnabled = dao.getRuleById(currentRule.id)?.isEnabled ?: true
                         dao.saveRule(currentRule.toEntity(isEnabled = wasEnabled))
+                        httpFetcher.clearSnapshotCache()
                         DebugLogBuffer.append("√ 规则 [${currentRule.name}] 已保存到本地数据库")
                     } else {
                         val response = client.save(RemoteRuleRequest(currentRule))

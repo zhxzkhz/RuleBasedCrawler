@@ -62,4 +62,37 @@ class FileSnapshotInterceptorTest {
             get("https://cdn.example.com/page").generateCacheKey(cacheSalt = "rule-b|1")
         )
     }
+
+    // ---------- 规则保存后的快照回收 ----------
+    // 快照键含规则指纹：保存后旧键文件成永久孤儿，clearCache 整体回收（内容可再生）
+
+    @Test
+    fun clearCacheRemovesSnapshotsButKeepsFormatMarker() {
+        val dir = java.nio.file.Files.createTempDirectory("snapshot-test").toFile()
+        try {
+            // 模拟既有缓存状态：格式标记 + 两份快照
+            java.io.File(dir, ".snapshot-v2").createNewFile()
+            java.io.File(dir, "abc.txt").writeText("旧快照")
+            java.io.File(dir, "def.txt").writeText("另一份旧快照")
+
+            FileSnapshotInterceptor(dir).clearCache()
+
+            val remaining = dir.listFiles()!!.map { it.name }.sorted()
+            // 快照全删，格式标记保留（避免下次请求触发全目录重复清理）
+            assertEquals(listOf(".snapshot-v2"), remaining)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun clearCacheIsSafeOnEmptyOrMissingDirectory() {
+        val dir = java.nio.file.Files.createTempDirectory("snapshot-empty").toFile()
+        try {
+            FileSnapshotInterceptor(dir).clearCache() // 空目录不抛异常
+            assertEquals(0, dir.listFiles()!!.size)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

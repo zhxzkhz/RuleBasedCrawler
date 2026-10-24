@@ -112,6 +112,8 @@ class RuleRepositoryImpl(
 
     override suspend fun saveData(rule: RuleEntity) {
         withContext(Dispatchers.IO) { ruleDao.saveRule(rule) }
+        // 快照键含规则指纹（updateTime）：保存后旧快照全部失效成孤儿，直接回收
+        httpFetcher.clearSnapshotCache()
     }
 
     override suspend fun deleteData(rule: RuleEntity) {
@@ -174,6 +176,7 @@ class RuleRepositoryImpl(
                             failedRules++
                         }
                     }
+                    if (entries.isNotEmpty()) httpFetcher.clearSnapshotCache()
                     RuleSubscriptionResult(added, updated, failedRules, null)
                 },
                 onFailure = { t ->
