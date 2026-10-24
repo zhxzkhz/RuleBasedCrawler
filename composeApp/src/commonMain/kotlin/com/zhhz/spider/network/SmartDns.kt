@@ -7,26 +7,51 @@ import java.net.InetAddress
 import java.nio.ByteBuffer
 
 /**
- * 自定义 DNS 解析器：通过指定的 DNS 服务器（逗号分隔的 IP）查询域名，
- * 用于绕过 DNS 污染。查询失败时回退到系统 DNS。
+ * 规则 customDns 字段的解析器。
+ *
+ * 支持两种写法：
+ * 1. 纯 IP 列表（"103.139.1.241" 或 "1.2.3.4,5.6.7.8"）——【默认，原始语义】
+ *    把填写的 IP 作为该规则所有请求的【直连目标】（hosts 覆盖语义）。
+ *    这是 5.23 初始版本的行为，社区流传的"直连 IP"（如哔咔镜像
+ *    picaapi.picacomic.com -> 103.139.1.241）就是这种用法。
+ *    ⚠️ 8.29 曾把它改为"UDP 53 自定义 DNS 服务器"语义，导致存量规则全部失效
+ *    （直连镜像不是 DNS 服务器，查询必然失败）——现已恢复，勿再改语义。
+ *
+ * 2. "dns:8.8.8.8" 前缀 —— 真正的自定义 DNS 服务器（明文 UDP 53 查询）。
+ *    注意：对被污染域名无效——伪造应答永远先于真实应答到达且事务 ID 相同，
+ *    无法过滤（实测 picaapi.picacomic.com 即如此）。
+ *
+ * 留空走系统 DNS。
  */
 class SmartDns(private val dnsConfig: String?) : Dns {
 
     override fun lookup(hostname: String): List<InetAddress> {
         if (dnsConfig.isNullOrBlank()) return Dns.SYSTEM.lookup(hostname)
 
-        val servers = dnsConfig.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val config = dnsConfig.trim()
 
-        for (server in servers) {
-            try {
-                val addrs = queryDns(server, hostname)
-                if (addrs.isNotEmpty()) return addrs
-            } catch (_: Exception) {
-                // 该服务器查询失败，尝试下一个
+        if (config.startsWith("dns:", ignoreCase = true)) {
+            val servers = config.substring(4).split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            for (server in servers) {
+                try {
+                    val addrs = queryDns(server, hostname)
+                    if (addrs.isNotEmpty()) return addrs
+                } catch (_: Exception) {
+                    // 该服务器查询失败，尝试下一个
+                }
             }
+            // 所有自定义 DNS 服务器都失败，回退到系统 DNS
+            return Dns.SYSTEM.lookup(hostname)
         }
 
-        // 所有自定义 DNS 服务器都失败，回退到系统 DNS
+        // 纯 IP 列表：直连目标（原始语义）
+        val directTargets = config.split(",").mapNotNull { entry ->
+            val ip = entry.trim()
+            if (ip.isEmpty()) null
+            else runCatching { InetAddress.getByName(ip) }.getOrNull()
+        }
+        if (directTargets.isNotEmpty()) return directTargets
+
         return Dns.SYSTEM.lookup(hostname)
     }
 

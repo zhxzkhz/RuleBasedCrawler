@@ -339,7 +339,7 @@ data class SourceRule(
     var type: Int = BookType.text,
     var concurrentRate: Long = 1000,
     var proxyUrl: String? = null,
-    var customDns: String? = null, // 1. DNS服务器: "8.8.8.8,8.8.4.4" 以逗号分割
+    var customDns: String? = null, // 直连 IP 列表（原始语义，如 "103.139.1.241"）；或 "dns:8.8.8.8" 指定 DNS 服务器
     var useCache: Boolean = true,
     var globalConfig: FetchConfig = FetchConfig(headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SpiderIDE/1.0")),
     var requireLogin: Boolean = false,

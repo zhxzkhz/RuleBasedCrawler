@@ -67,7 +67,7 @@ fun BasicInfoForm(rule: SourceRule, scope : CoroutineScope, onRuleChange: (Sourc
                 OutlinedTextField(
                     value = rule.customDns ?: "",
                     onValueChange = { onRuleChange(rule.copy(customDns = it)) },
-                    label = { Text("dns代理(可选)") },
+                    label = { Text("直连IP/DNS(可选，如 103.139.1.241 或 dns:8.8.8.8)") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
