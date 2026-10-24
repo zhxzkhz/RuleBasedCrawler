@@ -24,10 +24,13 @@ import org.koin.core.module.dsl.createdAtStart
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.core.qualifier.named
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.koin.dsl.module
 import java.io.File
 
 @OptIn(InternalComposeUiApi::class)
+private val diLogger = KotlinLogging.logger {}
+
 val commonModule = module {
 
     // 注入 Dao
@@ -40,7 +43,7 @@ val commonModule = module {
     // 创建拦截器单例
     single {
         val file: File = get<File>(named("cacheDir"))
-        println("cacheDir >> $file")
+        diLogger.info { "cacheDir >> $file" }
         FileSnapshotInterceptor(file)
     }
 

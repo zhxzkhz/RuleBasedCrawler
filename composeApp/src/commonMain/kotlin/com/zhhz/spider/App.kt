@@ -19,6 +19,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navigation
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.navigation.toRoute
@@ -28,6 +30,7 @@ import coil3.disk.DiskCache
 import coil3.disk.directory
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.CachePolicy
+import io.github.oshai.kotlinlogging.KotlinLogging
 import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.RuleEntity
 import com.zhhz.spider.di.commonModule
@@ -62,6 +65,8 @@ import org.mozilla.javascript.ContextFactory
 import rulebasedcrawler.composeapp.generated.resources.Res
 import rulebasedcrawler.composeapp.generated.resources.close_24px
 import java.io.File
+
+private val logger = KotlinLogging.logger {}
 
 val appModule = module {
     includes(platformModule,commonModule)
@@ -170,7 +175,13 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
                 NavHost(
                     navController = navController,
                     startDestination = "bookshelf",
-
+                    // 转场动画：默认 700ms 淡入淡出期间，正在退出的页面仍铺在最上层
+                    // 拦截点击（"从详情返回后第一次点击无效"的元凶）。
+                    // 返回方向旧页立即让位（死窗口归零），前进方向保留短淡入淡出维持观感。
+                    enterTransition = { fadeIn(tween(220)) },
+                    exitTransition = { fadeOut(tween(220)) },
+                    popEnterTransition = { fadeIn(tween(220)) },
+                    popExitTransition = { fadeOut(tween(0)) },
                 ) {
                     composable("bookshelf") {
                         BookshelfScreen(
@@ -348,7 +359,7 @@ fun NavController.popBackStackSafe(): Boolean {
 
     // 💡 核心防线：如果当前已经是首页（栈底）了，强行拦截，绝不退栈！
     if (currentDestId == startDestId) {
-        println("Navigation-Safe: 已在首页栈底，拦截多余的退栈指令，防止白屏！")
+        logger.debug { "Navigation-Safe: 已在首页栈底，拦截多余的退栈指令" }
         return false
     }
     return popBackStack()

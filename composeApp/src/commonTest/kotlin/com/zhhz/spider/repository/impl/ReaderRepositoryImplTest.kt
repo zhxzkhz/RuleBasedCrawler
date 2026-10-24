@@ -1,5 +1,6 @@
 package com.zhhz.spider.repository.impl
 
+import com.zhhz.spider.viewModel.MangaImage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -97,5 +98,44 @@ class ReaderRepositoryImplTest {
 
         assertEquals("正文\n▩https://example.com/images/illustration.webp▩\n结尾", content.text)
         assertEquals("https://example.com/images/illustration.webp", content.inlineImages.single().url)
+    }
+
+    // ---------- 小说章节缓存 JSON 的编码/解码 ----------
+    // 历史事故：导出侧曾把含插图的 CachedNovelChapter JSON 原样写进 TXT。
+    // 读取端必须能无损还原 text + inlineImages，旧版纯文本缓存回退为原文。
+
+    @Test
+    fun decodeCachedNovelChapterRoundTripsTextAndInlineImages() {
+        val cached = CachedNovelChapter(
+            text = "前文▩https://cdn.example.com/1.jpg▩后文",
+            inlineImages = listOf(
+                MangaImage(
+                    url = "https://cdn.example.com/1.jpg",
+                    headers = mutableMapOf("Referer" to "https://example.com"),
+                    ruleId = "rule-a"
+                )
+            )
+        )
+        val encoded = kotlinx.serialization.json.Json.encodeToString(cached)
+
+        val decoded = decodeCachedNovelChapter(encoded)
+
+        assertEquals(cached.text, decoded?.text)
+        assertEquals(cached.inlineImages, decoded?.inlineImages)
+    }
+
+    @Test
+    fun decodeCachedNovelChapterFallsBackToNullForLegacyPlainText() {
+        // 旧版缓存是纯文本正文，不是 JSON —— 必须返回 null 让调用方按原文使用
+        assertEquals(null, decodeCachedNovelChapter("第一行正文\n第二行正文"))
+        assertEquals(null, decodeCachedNovelChapter(""))
+    }
+
+    @Test
+    fun decodeCachedNovelChapterReturnsNullForCorruptedJson() {
+        // JSON 对象但不是 CachedNovelChapter 结构（缺 inlineImages 字段）
+        assertEquals(null, decodeCachedNovelChapter("""{"text":"只有文本"}"""))
+        // 截断的 JSON
+        assertEquals(null, decodeCachedNovelChapter("""{"text":"前文"""))
     }
 }

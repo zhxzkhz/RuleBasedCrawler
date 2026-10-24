@@ -12,8 +12,11 @@ import com.zhhz.spider.network.hasLegacyInvalidTitle
 import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.SessionRepository
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private val logger = KotlinLogging.logger {}
 
 class CatalogRepositoryImpl(
     private val chapterDao: ChapterDao,
@@ -77,7 +80,7 @@ class CatalogRepositoryImpl(
             // 无论走哪个同步分支，目录总数都以网络结果为准，
             // 书架"未读 N 章"红点依赖 totalChapters
             runCatching { bookDao.updateTotalChapters(bookUrl, chapters.size) }
-                .onFailure { println("更新 totalChapters 失败: ${it.message}") }
+                .onFailure { logger.warn(it) { "更新 totalChapters 失败" } }
 
             val localChapters = chapterDao.getChaptersByBookUrl(bookUrl)
             val localCount = localChapters.size
@@ -107,13 +110,13 @@ class CatalogRepositoryImpl(
 
                     // 💡 性能暴增：如果只更新了 2 章，这里就只执行 2 次插入，原本已有的 1000 章纹丝不动！
                     chapterDao.insertChapters(entities)
-                    println("Incremental Sync: 本地已有 $localCount 章，网络更新为 $fetchedCount 章，已增量追加 ${newChapters.size} 个新章节")
+                    logger.info { "目录增量同步: 本地已有 $localCount 章，网络更新为 $fetchedCount 章，已增量追加 ${newChapters.size} 个新章节" }
                 }
 
                 // 💡 算法 B：网络和本地章节数完全一致。说明没更新，直接返回！
                 // 💡 0次磁盘写入，完美保护手机闪存寿命！
                 fetchedCount == localCount && existingPrefixMatches -> {
-                    println("Incremental Sync: 目录无变动，无需写入数据库")
+                    logger.info { "目录增量同步: 目录无变动，无需写入数据库" }
                 }
 
                 // 💡 算法 C：极罕见的异常情况：网络章节数居然小于本地（说明源站被删改或重组了）
@@ -132,7 +135,7 @@ class CatalogRepositoryImpl(
                         )
                     }
                     chapterDao.saveCatalog(bookUrl, entities)
-                    println("Incremental Sync: 目录内容发生变化，已执行全量对齐。")
+                    logger.info { "目录增量同步: 目录内容发生变化，已执行全量对齐" }
                 }
             }
         }

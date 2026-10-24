@@ -154,8 +154,7 @@ class DecryptingFetcher(
                                 editor.abort() // 💡 保护：即使 abort 报错，也直接吃掉，绝对不准它逃逸出去卡死 UI！
                             } catch (_: Exception) {}
                         }
-                        e.printStackTrace()
-                        logger.error { "写入磁盘缓存失败: ${e.message}" }
+                        logger.error(e) { "写入磁盘缓存失败" }
                     }
                 }
             }

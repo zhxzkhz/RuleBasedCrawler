@@ -14,17 +14,20 @@ import com.zhhz.spider.db.MIGRATION_9_10
 import com.zhhz.spider.db.MIGRATION_10_11
 import com.zhhz.spider.db.MIGRATION_11_12
 import com.zhhz.spider.util.BookPackager
+import io.github.oshai.kotlinlogging.KotlinLogging
 import okio.Path.Companion.toOkioPath
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import java.io.File
 
+private val diLogger = KotlinLogging.logger {}
+
 actual val platformModule = module {
     // 注入数据库
     single<AppDatabase> {
         val dbFile = resolveDesktopDatabaseFile()
-        println("dbFile >> $dbFile")
+        diLogger.info { "dbFile >> $dbFile" }
         Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
             .setDriver(BundledSQLiteDriver())
             .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
@@ -102,9 +105,9 @@ private fun resolveDesktopDatabaseFile(): File {
                     src.copyTo(File(newFile.parentFile, newFile.name + suffix), overwrite = true)
                 }
             }
-            println("已迁移临时目录数据库到 ${newFile.absolutePath}")
+            diLogger.info { "已迁移临时目录数据库到 ${newFile.absolutePath}" }
         }.onFailure { e ->
-            System.err.println("数据库迁移失败，将在新位置重新创建: ${e.message}")
+            diLogger.warn(e) { "数据库迁移失败，将在新位置重新创建" }
         }
     }
     return newFile

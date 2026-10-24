@@ -198,7 +198,6 @@ fun MainScreen(
                 } catch (e: Exception) {
                     remoteStatus = "保存失败: ${e.message}"
                     DebugLogBuffer.append("规则保存失败: ${e.message}")
-                    e.printStackTrace()
                 }
             }
         }
