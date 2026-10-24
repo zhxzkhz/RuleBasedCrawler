@@ -74,12 +74,18 @@ class RuleRepositoryImpl(
      * 解析缓存由 init 里的 Flow 异步填充，createdAtStart() 只保证对象被创建、
      * 不保证首帧数据已到达；冷启动后立刻搜索会拿到空列表并抛「没有启用任何书源」。
      * 只在第一次访问时执行一次，之后走内存缓存。
+     *
+     * ⚠️ runBlocking 不指定调度器：协程直接跑在调用者线程的事件循环上，
+     * 挂起点由 Room 内部自行调度。此前写法 runBlocking(Dispatchers.IO) 会
+     * "占用调用者线程 + 再向 IO 池要一个线程"，调用者本身常在 IO/受限池上
+     * （如 MangaCallFactory 的 limitedParallelism(2)），嵌套时存在线程池互饿风险；
+     * DetailScreen 组合期调用 supportsComments() 时还会让主线程双重占线程。
      */
     private fun ensureInitialLoad() {
         if (initialLoadDone) return
         synchronized(initialLoadLock) {
             if (initialLoadDone) return
-            runCatching { runBlocking(Dispatchers.IO) { ruleDao.getAllRules() } }
+            runCatching { runBlocking { ruleDao.getAllRules() } }
                 .onSuccess { entities ->
                     _rawRulesCache.value = entities
                     _parsedRulesCache.value = entities.filter { it.isEnabled }.mapNotNull { entity ->

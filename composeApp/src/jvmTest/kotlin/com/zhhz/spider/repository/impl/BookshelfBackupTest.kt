@@ -305,9 +305,6 @@ private class FakeBookshelfDb(
         override suspend fun getBooksByUrls(urls: List<String>): List<BookEntity> =
             urls.mapNotNull { storedBooks[it] }
 
-        override suspend fun getHistoryBooks(): List<BookEntity> =
-            storedBooks.values.filter { !it.inLibrary }
-
         override suspend fun removeFromBookshelf(book: BookEntity) {
             storedBooks.remove(book.detailUrl)
         }
@@ -334,9 +331,6 @@ private class FakeBookshelfDb(
             }
         }
 
-        override fun getChaptersFlow(bookUrl: String): Flow<List<ChapterEntity>> =
-            flowOf(this@FakeBookshelfDb.chapters[bookUrl].orEmpty())
-
         override suspend fun markAsRead(bookUrl: String, chapterUrl: String) = Unit
 
         override suspend fun insertChaptersIgnore(chapters: List<ChapterEntity>): List<Long> =
@@ -346,7 +340,6 @@ private class FakeBookshelfDb(
                 chapter.id
             }
 
-        override suspend fun updateChapterMetadata(bookUrl: String, chapterUrl: String, name: String, index: Int) = Unit
 
         override suspend fun addToGroup(urls: List<String>, mask: Long) {
             urls.forEach { url ->
@@ -412,14 +405,6 @@ private class FakeBookshelfDb(
 
         override suspend fun getChaptersByBookUrl(bookUrl: String): List<ChapterEntity> =
             this@FakeBookshelfDb.chapters[bookUrl].orEmpty()
-
-        override fun getChaptersFlow(bookUrl: String): Flow<List<ChapterEntity>> =
-            flowOf(this@FakeBookshelfDb.chapters[bookUrl].orEmpty())
-
-        override suspend fun getChaptersCount(bookUrl: String): Int =
-            this@FakeBookshelfDb.chapters[bookUrl]?.size ?: 0
-
-        override suspend fun updateChapterReadStatus(bookUrl: String, chapterIndex: Int, isRead: Boolean) = Unit
 
         override suspend fun deleteChaptersByBookUrl(bookUrl: String) {
             this@FakeBookshelfDb.chapters.remove(bookUrl)

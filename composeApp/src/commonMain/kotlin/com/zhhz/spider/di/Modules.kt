@@ -6,7 +6,6 @@ import com.zhhz.spider.manager.BookCleanupManager
 import com.zhhz.spider.manager.BookSessionManager
 import com.zhhz.spider.manager.ContextSessionManager
 import com.zhhz.spider.manager.DownloadManager
-import com.zhhz.spider.manager.RuleManager
 import com.zhhz.spider.network.FetchTaskRunner
 import com.zhhz.spider.network.FileSnapshotInterceptor
 import com.zhhz.spider.network.HttpFetcher
@@ -49,7 +48,6 @@ val commonModule = module {
     // 整个 App 运行期间只存在一个会话管理器
     single { ContextSessionManager(maxEntries = 30) }
 
-    singleOf(::RuleManager)
     singleOf(::BookSessionManager)
     singleOf(::HttpFetcher)
     singleOf(::MangaCallFactory)

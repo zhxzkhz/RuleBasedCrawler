@@ -21,7 +21,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.set
 
 private val logger = KotlinLogging.logger {}
@@ -36,27 +35,59 @@ class DownloadManager(
 
     /**
      * 可动态调整上限的并发控制器。
+     *
+     * 旧实现 resize 直接换新 Semaphore 实例：扩容时"旧持有者 + 新实例获取者"叠加，
+     * 瞬时并发可达 旧上限 + 新上限。
+     *
+     * 正确做法（单一实例 + 动态上限）：
+     * - 扩容：归还预先扣减的差额许可，排队任务立即被唤醒，总并发直接达到新上限；
+     * - 缩容：先回收空闲许可，仍在使用中的部分在任务完成时被吞还（releaseOne），
+     *   并发随任务完成自然收敛到新上限。
+     *
+     * ⚠️ kotlinx 的 Semaphore 禁止 release 超出构造许可总数（over-release 抛异常），
+     * 因此按固定上限构造，用"预先扣减 + 超限吞还"表达较小的动态上限；
+     * 所有归还都对应一次真实 acquire（初始扣减/任务获取/缩容回收），账目始终平衡。
      */
     private class ResizeableSemaphore(initialLimit: Int) {
-        @Volatile private var semaphore = Semaphore(initialLimit)
-        private val activePermits = AtomicInteger(0)
-        @Volatile private var limit = initialLimit
+
+        companion object {
+            // 上限只需覆盖设置界面的最大值（当前：书 5 / 图 12），取 128 留足余量
+            private const val MAX_LIMIT = 128
+        }
+
+        private val semaphore = Semaphore(MAX_LIMIT, acquiredPermits = MAX_LIMIT - initialLimit.coerceIn(1, MAX_LIMIT))
+        private var limit = initialLimit.coerceIn(1, MAX_LIMIT)
 
         fun resize(newLimit: Int) {
-            if (newLimit < 1) return
-            limit = newLimit
-            semaphore = Semaphore(newLimit)
+            val target = newLimit.coerceIn(1, MAX_LIMIT)
+            synchronized(this) {
+                val delta = target - limit
+                if (delta == 0) return
+                limit = target
+                if (delta > 0) {
+                    // kotlinx Semaphore 只有单许可 release()，循环补发差额
+                    repeat(delta) { semaphore.release() }
+                } else {
+                    var toTake = -delta
+                    while (toTake > 0 && semaphore.tryAcquire()) toTake--
+                }
+            }
         }
 
         suspend fun <T> withPermit(block: suspend () -> T): T {
-            val currentSem = semaphore
-            currentSem.acquire()
-            activePermits.incrementAndGet()
+            semaphore.acquire()
             try {
                 return block()
             } finally {
-                activePermits.decrementAndGet()
-                currentSem.release()
+                releaseOne()
+            }
+        }
+
+        private fun releaseOne() {
+            synchronized(this) {
+                // 缩容后超出新上限的许可直接吞掉，不归还
+                if (semaphore.availablePermits >= limit) return
+                semaphore.release()
             }
         }
     }
@@ -241,7 +272,12 @@ class DownloadManager(
                     current + (bookUrl to task.copy(status = DownloadStatus.ERROR))
                 }
             } finally {
-                lock.withLock { activeJobs.remove(bookUrl) }
+                // 协程被取消（暂停/取消下载）时 finally 里仍会执行，但 mutex.lock()
+                // 是可取消挂起点——已取消的协程会直接抛 CancellationException，
+                // 导致 activeJobs 条目永远清不掉（泄漏）。NonCancellable 保证清理必达。
+                withContext(NonCancellable) {
+                    lock.withLock { activeJobs.remove(bookUrl) }
+                }
             }
         }
         // 必须在锁内写入，确保 cancelDownload/pauseDownload 不会遗漏

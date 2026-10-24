@@ -208,9 +208,6 @@ private class FakeBookDao(
     override suspend fun getBooksByUrls(urls: List<String>): List<BookEntity> =
         urls.mapNotNull { books[it] }
 
-    override suspend fun getHistoryBooks(): List<BookEntity> =
-        books.values.filter { !it.inLibrary }
-
     override suspend fun removeFromBookshelf(book: BookEntity) {
         books.remove(book.detailUrl)
     }
@@ -228,12 +225,10 @@ private class FakeBookDao(
         updateTime: Long
     ) = Unit
 
-    override fun getChaptersFlow(bookUrl: String): Flow<List<ChapterEntity>> = flowOf(emptyList())
     override suspend fun markAsRead(bookUrl: String, chapterUrl: String) = Unit
 
     override suspend fun insertChaptersIgnore(chapters: List<ChapterEntity>): List<Long> = emptyList()
 
-    override suspend fun updateChapterMetadata(bookUrl: String, chapterUrl: String, name: String, index: Int) = Unit
 
     override suspend fun addToGroup(urls: List<String>, mask: Long) = Unit
 

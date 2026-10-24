@@ -8,7 +8,6 @@ import com.zhhz.spider.db.BookDao
 import com.zhhz.spider.db.ChapterDao
 import com.zhhz.spider.db.toDomain
 import com.zhhz.spider.manager.imageRequest
-import com.zhhz.spider.repository.CatalogRepository
 import com.zhhz.spider.repository.ReaderRepository
 import com.zhhz.spider.repository.RuleRepository
 import com.zhhz.spider.repository.impl.decodeCachedNovelChapter
@@ -38,7 +37,6 @@ actual class BookPackager(
     private val chapterDao: ChapterDao,
     private val ruleRepository: RuleRepository,
     private val readerRepository: ReaderRepository,
-    private val catalogRepository: CatalogRepository,
     private val platformContext: PlatformContext
 ) {
 

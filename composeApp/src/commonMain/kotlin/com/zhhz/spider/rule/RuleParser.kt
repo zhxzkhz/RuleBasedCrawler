@@ -3,20 +3,16 @@ package com.zhhz.spider.rule
 //import com.sun.script.javascript.RhinoScriptEngineFactory
 import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.JSONPath
-import com.zhhz.spider.ENGINE
 import com.zhhz.spider.util.JsExtensionClass
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import java.util.regex.Pattern
 import java.util.concurrent.ConcurrentHashMap
-import javax.script.ScriptEngine
 import javax.script.ScriptException
 import javax.script.SimpleBindings
 
 private val logger = KotlinLogging.logger {}
-
-val SCRIPT_ENGINE: ScriptEngine = ENGINE
 
 object RuleParser {
     private const val TRACE_MAX_VALUES = 50

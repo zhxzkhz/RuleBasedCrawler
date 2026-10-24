@@ -624,7 +624,7 @@ data class MangaImage(
     // 2. 💡 扁平化的请求头 Map（已在仓库层动态完成了 {bookId}、{chapterId} 占位符和 CSS 选择器提取替换）
     val headers: MutableMap<String, String> = mutableMapOf(),
 
-    // 3. 💡 书源规则 ID（供后台解密线程 MangaDescrambleTransformation 通过 Koin 极速查找 rule）
+    // 3. 💡 书源规则 ID（供解密线程 DecryptingFetcher 通过 Koin 极速查找 rule）
     val ruleId: String
 )
 
