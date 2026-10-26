@@ -49,6 +49,10 @@ import com.zhhz.spider.viewModel.ExploreViewModel
 import com.zhhz.spider.viewModel.ReaderViewModel
 import com.zhhz.spider.viewModel.SearchViewModel
 import com.zhhz.spider.viewModel.ReaderUiIntent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okio.FileSystem
 import okio.Path
 import org.jetbrains.compose.resources.painterResource
@@ -104,15 +108,22 @@ fun App(koinConfig: KoinAppDeclaration = {}) {
 
         val diskCache = remember {
             // 图片磁盘缓存键升级为 v2 复合键（mangaImageDiskCacheKey）后，历史裸 URL
-            // 条目永不再命中：在 Coil 打开目录前按版本标记一次性回收，避免死数据长期
-            // 占用磁盘配额。标记放在缓存目录的父目录（放里面会被本次清理删掉）。
+            // 条目永不再命中，需一次性回收。⚠️ 不能在主线程递归删除：缓存可达万级
+            // 文件，慢存储上必然 ANR。做法：目录 renameTo 是 O(1) 原子操作（同卷），
+            // 主线程毫秒级完成"让位"，Coil 在原路径全新重建；真正的递归删除放后台。
             val imageCachePath: Path = get(Path::class.java, named("imageCacheDir"))
             val imageCacheDirFile = File(imageCachePath.toString())
             val versionMarker = imageCacheDirFile.parentFile?.let { File(it, ".image-cache-v2") }
-            if (versionMarker != null && !versionMarker.exists()) {
+            if (versionMarker != null && !versionMarker.exists() && imageCacheDirFile.exists()) {
                 runCatching {
-                    imageCacheDirFile.listFiles()?.forEach { it.deleteRecursively() }
-                    versionMarker.createNewFile()
+                    val legacyDir = File(imageCacheDirFile.parentFile, "spider_image_legacy")
+                    if (imageCacheDirFile.renameTo(legacyDir)) {
+                        versionMarker.createNewFile()
+                        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                            runCatching { legacyDir.deleteRecursively() }
+                        }
+                    }
+                    // rename 失败（如被占用）：标记不落盘，下次启动重试；缓存留给 Coil LRU 自然淘汰
                 }
             }
             DiskCache.Builder()

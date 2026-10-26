@@ -17,3 +17,11 @@ captures
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
+
+# 会话分析产物与运行日志（不入库）
+.zcode/
+*.log
+/test.kt
+/RuleBasedCrawler-fix.diff.diff
+/RuleBasedCrawler-修复补丁-*.zip
+/RuleBasedCrawler-问题核实与修复建议.md

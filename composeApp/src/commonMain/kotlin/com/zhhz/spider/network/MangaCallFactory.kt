@@ -82,16 +82,20 @@ class MangaCallFactory(
         }
 
         val client = if (!ruleId.isNullOrBlank()) {
-            httpFetcher.getExistingClient(ruleId)
-                ?: rule?.let { r ->
-                    val proxy = r.proxyUrl?.takeIf { it.contains(":") }?.let {
-                        try {
-                            val parts = it.split(":")
-                            Proxy(Proxy.Type.HTTP, InetSocketAddress(parts[0], parts[1].toInt()))
-                        } catch (_: Exception) { null }
-                    }
-                    httpFetcher.getOrCreateClient(ruleId, proxy, r.customDns)
+            // 💡 必须优先走 getOrCreateClient：它内部校验代理/DNS 配置指纹，规则改了
+            // customDns/代理后自动重建。旧代码先查不校验指纹的 getExistingClient，
+            // 导致图片请求在下次 HTML 请求前一直用旧 DNS 的客户端。
+            rule?.let { r ->
+                val proxy = r.proxyUrl?.takeIf { it.contains(":") }?.let {
+                    try {
+                        val parts = it.split(":")
+                        Proxy(Proxy.Type.HTTP, InetSocketAddress(parts[0], parts[1].toInt()))
+                    } catch (_: Exception) { null }
                 }
+                httpFetcher.getOrCreateClient(ruleId, proxy, r.customDns)
+            }
+                // 规则未知/被禁用时拿不到期望配置，只能尽力复用既有客户端
+                ?: httpFetcher.getExistingClient(ruleId)
                 ?: httpFetcher.baseClient
         } else {
             httpFetcher.baseClient
