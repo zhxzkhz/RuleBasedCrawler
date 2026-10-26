@@ -73,21 +73,33 @@ class SettingsRepository(
     private val pendingUpdates = Channel<(AppSettings) -> AppSettings>(Channel.UNLIMITED)
 
     init {
-        // 单一写入者：锁内基于最新设置依次应用更新并整份写回
+        // 单一写入者：锁内基于最新设置依次应用更新并整份写回。
+        // ⚠️ 每个变换独立容错：某个 transform 抛异常时只跳过该次变更——
+        // 若异常逃逸导致写入者协程死亡，Channel 将无人消费，
+        // 此后所有 update() 静默失效（设置再也存不下来）
         scope.launch {
             for (transform in pendingUpdates) {
                 mutex.withLock {
-                    var settings = transform(loadInternal())
+                    var settings = applyTransformSafely(loadInternal(), transform)
+                        ?: return@withLock // 首个变换即失败：本次不落盘，后续排队项留待下一轮
                     // 合并已排队的后续变更，滑杆高频拖动只落盘一次
                     while (true) {
                         val next = pendingUpdates.tryReceive().getOrNull() ?: break
-                        settings = next(settings)
+                        // 单个排队变换失败只跳过它，继续合并其余
+                        settings = applyTransformSafely(settings, next) ?: continue
                     }
                     saveInternal(settings)
                 }
             }
         }
     }
+
+    private fun applyTransformSafely(
+        current: AppSettings,
+        transform: (AppSettings) -> AppSettings
+    ): AppSettings? = runCatching { transform(current) }
+        .onFailure { e -> logger.error(e) { "设置更新变换执行失败，已跳过该次变更" } }
+        .getOrNull()
 
     /**
      * 异步原子更新：基于最新已保存设置应用 [transform] 后整份写回。
@@ -152,8 +164,9 @@ class SettingsRepository(
         return settings
     }
 
-    private suspend fun saveInternal(settings: AppSettings) {
-        runCatching {
+    /** @return 是否成功落库（失败已内部记录日志，调用方据此决定是否保留迁移源文件） */
+    private suspend fun saveInternal(settings: AppSettings): Boolean {
+        return runCatching {
             val entries = mapOf(
                 "downloadBooks" to settings.downloadBooks.toString(),
                 "downloadImages" to settings.downloadImages.toString(),
@@ -181,9 +194,10 @@ class SettingsRepository(
                 settingsDao.upsert(SettingsEntity(key = KEY_PREFIX + key, value = value))
             }
             cachedSettings = settings
+            true
         }.onFailure { e ->
             logger.error(e) { "保存设置失败" }
-        }
+        }.getOrDefault(false)
     }
 
     private suspend fun migrateFromJsonIfNeeded() {
@@ -193,9 +207,14 @@ class SettingsRepository(
 
         runCatching {
             val oldSettings = json.decodeFromString<AppSettings>(file.readText())
-            saveInternal(oldSettings)
-            file.delete()
-            logger.info { "已从 JSON 文件迁移设置到数据库" }
+            // 只有确认落库成功才删源文件；失败时保留 JSON，下次启动重试
+            // （旧实现 saveInternal 吞掉异常后无条件删文件，失败即永久丢设置）
+            if (saveInternal(oldSettings)) {
+                file.delete()
+                logger.info { "已从 JSON 文件迁移设置到数据库" }
+            } else {
+                logger.error { "JSON 设置迁移落库失败，保留源文件待下次重试" }
+            }
         }.onFailure { e ->
             logger.warn(e) { "JSON 设置文件迁移失败，使用默认值" }
         }

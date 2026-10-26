@@ -147,6 +147,8 @@ class DetailViewModel(
         viewModelScope.launch {
             try {
                 val newComments = commentRepository.fetchComments(source.ruleId, bookUrl, page)
+                // 换源后丢弃过期响应：旧源的评论不能覆盖新源的面板（与 handleLoadMoreComments 一致）
+                if (uiState.value.currentSource != source) return@launch
                 updateState {
                     copy(
                         comments = if (page == 1) newComments else comments + newComments,
@@ -156,6 +158,7 @@ class DetailViewModel(
                     )
                 }
             } catch (e: Exception) {
+                if (uiState.value.currentSource != source) return@launch
                 updateState { copy(isLoadingComments = false) }
                 sendEffect(DetailUiEffect.ShowToast("加载评论失败: ${e.message}"))
             }
